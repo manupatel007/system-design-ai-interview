@@ -137,18 +137,30 @@ button:disabled {
   padding: 18px;
 }
 
-canvas {
-  display: block;
+#excalidraw-root {
+  position: relative;
   width: 100%;
   height: min(62vh, 620px);
-  border: 1px dashed #334155;
+  min-height: 520px;
+  overflow: hidden;
+  border: 1px solid #334155;
   border-radius: 12px;
-  cursor: crosshair;
-  background:
-    linear-gradient(rgba(51, 65, 85, 0.22) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(51, 65, 85, 0.22) 1px, transparent 1px),
-    #0b111a;
-  background-size: 24px 24px;
+  background: #0b111a;
+}
+
+.canvas-help,
+.canvas-loading {
+  color: #8da0b8;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.canvas-help {
+  margin-bottom: 10px;
+}
+
+.canvas-loading {
+  padding: 24px;
 }
 
 .transcript-panel {
@@ -166,6 +178,23 @@ canvas {
 
 details {
   color: #8da0b8;
+}
+
+.diagram-summary {
+  color: #c5d3e3;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.diagram-json {
+  max-height: 260px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  color: #9ec5ff;
+  background: #0a0f17;
+  font-size: 0.68rem;
+  white-space: pre-wrap;
 }
 
 #events {

@@ -10,6 +10,7 @@ import numpy as np
 
 from voice_interviewer.audio import AudioFrameBuffer, pcm16_bytes_to_float32
 from voice_interviewer.config import Settings
+from voice_interviewer.diagram import DiagramSnapshot, DiagramValidationError
 from voice_interviewer.events import ClientState, EventFactory
 from voice_interviewer.models import (
     InterviewContext,
@@ -98,6 +99,35 @@ class InterviewSessionPipeline:
             self._client.problem = _optional_string(values.get("problem"))
             self._client.glossary = _string_list(values.get("glossary"))
             await self._emit("session.configured")
+            return
+        if event_type == "canvas.snapshot":
+            try:
+                snapshot = DiagramSnapshot.from_payload(values)
+            except DiagramValidationError as error:
+                await self._emit("error", code="invalid_diagram", message=str(error))
+                return
+            self._client.diagram_snapshot = snapshot
+            self._client.selected_object_ids = list(snapshot.selected_object_ids)
+            changed = bool(
+                snapshot.delta.added_ids
+                or snapshot.delta.updated_ids
+                or snapshot.delta.removed_ids
+            )
+            if changed:
+                now = time.monotonic()
+                self._client.last_canvas_activity_at = now
+                self._client.recent_diagram_delta = snapshot.delta.summary or (
+                    f"updated diagram revision {snapshot.revision}"
+                )
+                self._turn_gate.on_canvas_activity(now)
+            await self._emit(
+                "canvas.synced",
+                revision=snapshot.revision,
+                nodeCount=len(snapshot.nodes),
+                edgeCount=len(snapshot.edges),
+                selectedObjectIds=list(snapshot.selected_object_ids),
+            )
+            self._schedule_response()
             return
         if event_type == "canvas.activity":
             now = time.monotonic()
@@ -213,6 +243,7 @@ class InterviewSessionPipeline:
                 recent_diagram_delta=self._client.recent_diagram_delta,
                 selected_object_ids=tuple(self._client.selected_object_ids),
                 glossary=tuple(self._client.glossary),
+                diagram=self._client.diagram_snapshot,
             )
             self._client.recent_diagram_delta = None
             response_text = await self.llm.respond(context)
@@ -239,7 +270,12 @@ class InterviewSessionPipeline:
             await self._emit("error", code="response_failed", message=str(error))
 
     def _stt_prompt(self) -> str | None:
-        terms = list(dict.fromkeys(self._client.glossary + self._client.selected_object_ids))
+        diagram_terms = (
+            list(self._client.diagram_snapshot.glossary_terms())
+            if self._client.diagram_snapshot
+            else []
+        )
+        terms = list(dict.fromkeys(self._client.glossary + diagram_terms))
         if not terms:
             return None
         return "System design interview. Expected technical terms: " + ", ".join(terms[:50])

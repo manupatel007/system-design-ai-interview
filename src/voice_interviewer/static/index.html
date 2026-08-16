@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Voice Interviewer Scaffold</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/excalidraw/diagram-app.css" />
   </head>
   <body>
     <main>
@@ -36,22 +37,33 @@
         <article class="panel canvas-panel">
           <div class="panel-heading">
             <div>
-              <p class="eyebrow">Canvas activity signal</p>
-              <h2>Sketch here while speaking</h2>
+              <p class="eyebrow">Structured architecture canvas</p>
+              <h2>Draw the system while you explain it</h2>
             </div>
             <button id="clear" class="secondary">Clear</button>
           </div>
-          <canvas id="canvas" width="900" height="520"></canvas>
+          <p class="canvas-help">Use shapes, bound text, arrows, and groups. The interviewer receives a compact semantic snapshot, not pixels.</p>
+          <div id="excalidraw-root" aria-label="System design diagram editor">
+            <p class="canvas-loading">Loading structured canvas...</p>
+          </div>
         </article>
 
         <aside class="panel transcript-panel">
           <div>
             <p class="eyebrow">Candidate</p>
-            <p id="candidate" class="speech">Waiting for speech…</p>
+            <p id="candidate" class="speech">Waiting for speech...</p>
           </div>
           <div>
             <p class="eyebrow">Interviewer</p>
-            <p id="interviewer" class="speech">Waiting for a completed turn…</p>
+            <p id="interviewer" class="speech">Waiting for a completed turn...</p>
+          </div>
+          <div>
+            <p class="eyebrow">Diagram model</p>
+            <p id="diagram-summary" class="diagram-summary">Waiting for canvas...</p>
+            <details>
+              <summary>Structured snapshot</summary>
+              <pre id="diagram-json" class="diagram-json">{}</pre>
+            </details>
           </div>
           <details>
             <summary>Event log</summary>
@@ -61,5 +73,6 @@
       </section>
     </main>
     <script type="module" src="/static/app.js"></script>
+    <script type="module" src="/static/excalidraw/diagram-app.js"></script>
   </body>
 </html>

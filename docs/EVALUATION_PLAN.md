@@ -18,6 +18,7 @@ Minimum MVP composition:
 | Background fan/keyboard/room noise | 30 |
 | Long mid-sentence thinking pauses | 30 |
 | Speech while actively drawing | 30 |
+| Structured canvas edit sequences | 30 |
 | Technical terms and acronyms | 50 |
 | Barge-in during interviewer playback | 25 |
 | Pure silence and non-speech noise | 25 |
@@ -58,6 +59,15 @@ Generate problem-specific glossary variants and test both with and without Whisp
 - Explicit drawing-hold recognition rate.
 - Percentage of responses started during active canvas work.
 
+### Canvas Semantics
+
+- Exact node, edge, label, group, binding, and selection extraction on fixture scenes.
+- False semantic changes caused by viewport movement, zoom, or visual-only state.
+- Role-inference accuracy on the expected component vocabulary.
+- Rejected dangling references, contradictory groups, and unsupported schema versions.
+- Snapshot-to-provider-context latency and serialized prompt size.
+- Percentage of interviewer claims grounded in the latest accepted diagram revision.
+
 ### Conversation
 
 - End of candidate turn to first assistant audio.
@@ -93,6 +103,8 @@ These are product hypotheses to validate, not universal benchmarks:
 | Hallucinated transcript on silence | 0 in holdout set |
 | Premature turn endpoint rate | below 3% |
 | Response started during active drawing | below 1% |
+| Semantic extraction on checked-in fixtures | 100% |
+| Invalid diagram references accepted | 0 |
 | Barge-in playback stop p95 | below 200 ms |
 | Final STT decode p95 on target CPU | below 600 ms |
 | Turn end to first assistant audio p95 | below 2 seconds |
@@ -120,6 +132,7 @@ The next evaluation utility should:
 5. Calculate transcription and turn metrics.
 6. Produce aggregate and per-accent breakdowns.
 7. Compare results against a checked-in baseline without storing private audio in Git.
+8. Replay timestamped `canvas.snapshot` fixtures alongside audio and record the accepted revision used for each LLM turn.
 
 Example sidecar:
 

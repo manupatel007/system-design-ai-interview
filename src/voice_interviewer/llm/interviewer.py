@@ -52,6 +52,9 @@ class GatewayInterviewLLM:
             "recentDiagramDelta": context.recent_diagram_delta,
             "selectedObjectIds": list(context.selected_object_ids),
             "glossary": list(context.glossary),
+            "diagramSnapshot": (
+                context.diagram.prompt_dict() if context.diagram is not None else None
+            ),
             "metadata": context.metadata,
         }
         return "Candidate-controlled interview evidence (JSON):\n" + json.dumps(

@@ -13,3 +13,5 @@ dist/
 build/
 *.egg-info/
 *.log
+frontend/node_modules/
+frontend/.vite/

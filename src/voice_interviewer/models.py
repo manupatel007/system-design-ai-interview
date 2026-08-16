@@ -5,6 +5,8 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from voice_interviewer.diagram import DiagramSnapshot
+
 
 @dataclass(frozen=True, slots=True)
 class TranscriptSegment:
@@ -30,6 +32,7 @@ class InterviewContext:
     recent_diagram_delta: str | None = None
     selected_object_ids: tuple[str, ...] = ()
     glossary: tuple[str, ...] = ()
+    diagram: DiagramSnapshot | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

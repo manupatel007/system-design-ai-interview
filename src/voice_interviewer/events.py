@@ -4,6 +4,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from voice_interviewer.diagram import DiagramSnapshot
+
 
 @dataclass(slots=True)
 class EventFactory:
@@ -27,4 +29,5 @@ class ClientState:
     glossary: list[str] = field(default_factory=list)
     recent_diagram_delta: str | None = None
     selected_object_ids: list[str] = field(default_factory=list)
+    diagram_snapshot: DiagramSnapshot | None = None
     last_canvas_activity_at: float = 0.0

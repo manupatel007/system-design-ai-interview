@@ -8,7 +8,8 @@ const elements = {
   candidate: document.querySelector("#candidate"),
   interviewer: document.querySelector("#interviewer"),
   events: document.querySelector("#events"),
-  canvas: document.querySelector("#canvas"),
+  diagramSummary: document.querySelector("#diagram-summary"),
+  diagramJson: document.querySelector("#diagram-json"),
   clear: document.querySelector("#clear"),
 };
 
@@ -18,6 +19,7 @@ let audioContext;
 let captureNode;
 let microphoneActive = false;
 const playbackSources = new Set();
+let latestDiagramSnapshot = window.__diagramSnapshot ?? null;
 
 function setStatus(text, connected = false) {
   elements.status.textContent = text;
@@ -42,7 +44,7 @@ function connect() {
   const sessionId = crypto.randomUUID();
   socket = new WebSocket(`${scheme}://${location.host}/ws/interview/${sessionId}`);
   socket.binaryType = "arraybuffer";
-  setStatus("Connecting…");
+  setStatus("Connecting...");
 
   socket.addEventListener("open", () => {
     setStatus("Connected", true);
@@ -53,6 +55,7 @@ function connect() {
       problem: elements.problem.value,
       glossary: elements.glossary.value.split(",").map((term) => term.trim()).filter(Boolean),
     });
+    if (latestDiagramSnapshot) send("canvas.snapshot", latestDiagramSnapshot);
   });
 
   socket.addEventListener("message", ({ data }) => {
@@ -139,51 +142,22 @@ function stopPlayback() {
   playbackSources.clear();
 }
 
-const drawing = (() => {
-  const context = elements.canvas.getContext("2d");
-  context.lineWidth = 3;
-  context.lineCap = "round";
-  context.strokeStyle = "#6ee7b7";
-  let active = false;
-  let lastSignal = 0;
+function renderDiagram(snapshot) {
+  const delta = snapshot.delta?.summary ? ` - ${snapshot.delta.summary}` : "";
+  elements.diagramSummary.textContent =
+    `${snapshot.nodes.length} components | ${snapshot.edges.length} relationships${delta}`;
+  elements.diagramJson.textContent = JSON.stringify(snapshot, null, 2);
+}
 
-  function point(event) {
-    const bounds = elements.canvas.getBoundingClientRect();
-    return {
-      x: (event.clientX - bounds.left) * (elements.canvas.width / bounds.width),
-      y: (event.clientY - bounds.top) * (elements.canvas.height / bounds.height),
-    };
-  }
+window.addEventListener("diagram.snapshot", ({ detail }) => {
+  latestDiagramSnapshot = detail;
+  renderDiagram(detail);
+  send("canvas.snapshot", detail);
+});
 
-  elements.canvas.addEventListener("pointerdown", (event) => {
-    active = true;
-    const current = point(event);
-    context.beginPath();
-    context.moveTo(current.x, current.y);
-    elements.canvas.setPointerCapture(event.pointerId);
-  });
-
-  elements.canvas.addEventListener("pointermove", (event) => {
-    if (!active) return;
-    const current = point(event);
-    context.lineTo(current.x, current.y);
-    context.stroke();
-    if (performance.now() - lastSignal > 250) {
-      send("canvas.activity", { diagramDelta: "added or adjusted elements on the canvas" });
-      lastSignal = performance.now();
-    }
-  });
-
-  elements.canvas.addEventListener("pointerup", () => {
-    active = false;
-    send("canvas.activity", { diagramDelta: "finished a canvas edit" });
-  });
-
-  elements.clear.addEventListener("click", () => {
-    context.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
-    send("canvas.activity", { diagramDelta: "cleared the canvas" });
-  });
-})();
+elements.clear.addEventListener("click", () => {
+  window.dispatchEvent(new Event("diagram.clear"));
+});
 
 elements.connect.addEventListener("click", connect);
 elements.microphone.addEventListener("click", () => toggleMicrophone().catch((error) => setStatus(error.message)));

@@ -1,6 +1,6 @@
 # Local Voice Interviewer Scaffold
 
-Runnable local-first voice pipeline for an AI system-design interviewer. Speech recognition, voice activity detection, and speech synthesis run locally; the interviewer LLM remains mocked by default. A browser/WebSocket path exercises turn-taking alongside canvas activity.
+Runnable local-first voice pipeline for an AI system-design interviewer. Speech recognition, voice activity detection, and speech synthesis run locally; the interviewer LLM remains mocked by default. The browser embeds Excalidraw and sends validated semantic nodes, edges, groups, selections, and deltas alongside each spoken turn.
 
 ## Pipeline
 
@@ -8,6 +8,7 @@ Runnable local-first voice pipeline for an AI system-design interviewer. Speech 
 Browser microphone (16 kHz PCM)
   -> Silero VAD
   -> faster-whisper base.en
+  + structured Excalidraw snapshot
   -> canvas-aware turn gate
   -> mock, Databricks, or Azure Foundry interviewer LLM
   -> Kokoro-82M INT8 local TTS
@@ -22,6 +23,7 @@ The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and K
 - [`uv`](https://docs.astral.sh/uv/)
 - A modern CPU with approximately 2 GB free RAM for the base configuration
 - Microphone access in the browser
+- Node.js 22+ and pnpm only when rebuilding the checked-in canvas bundle
 
 Python dependencies, uv caches, Hugging Face caches, temporary downloads, model weights, and the virtual environment are all redirected beneath this project on the `F:` drive by `scripts/env.ps1`.
 
@@ -63,7 +65,17 @@ For local Silero VAD, `base.en` transcription, Kokoro speech, and the mock inter
 uv run voice-interviewer serve
 ```
 
-Open `http://127.0.0.1:8000`, connect, start the microphone, and draw on the canvas while speaking. Kokoro synthesizes each interviewer response locally and the browser plays its 24 kHz PCM output.
+Open `http://127.0.0.1:8000`, connect, start the microphone, and draw on the Excalidraw canvas while speaking. The right panel exposes the exact semantic snapshot sent to the interviewer. Kokoro synthesizes each response locally and the browser plays its 24 kHz PCM output.
+
+## Rebuild the Canvas UI
+
+Runtime users do not need Node or internet access because the production bundle is checked in. After changing `frontend/`, rebuild and test it with:
+
+```powershell
+.\scripts\build_frontend.ps1
+```
+
+The pnpm store and cache remain beneath `.cache` on the `F:` workspace.
 
 ## Validate Local STT
 
@@ -124,8 +136,10 @@ Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databr
 - Whisper partial transcripts are intentionally not fed to the LLM. Only finalized utterances trigger reasoning.
 - `base.en` is English-only and must be evaluated on expected accents and technical vocabulary.
 - Silero VAD determines speech boundaries; the separate turn gate decides whether the candidate has yielded the floor.
-- The canvas is a signaling stub, not the final structured architecture editor.
+- Diagram roles are deterministic label heuristics unless an element supplies an explicit `customData.systemDesignRole`.
+- Visual style and exact geometry remain in session state but are intentionally omitted from provider prompts.
+- The current interviewer prompt is concise and diagram-aware; phase tracking and rubric-driven follow-ups belong to the next checkpoint.
 - Kokoro currently synthesizes a full response before sending one PCM chunk; clause streaming remains future work.
 - Raw audio is held only for the active utterance and is not persisted.
 
-See `docs/VOICE_PIPELINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.
+See `docs/VOICE_PIPELINE.md`, `docs/STRUCTURED_CANVAS.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.

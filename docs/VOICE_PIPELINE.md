@@ -22,14 +22,15 @@ Browser audio
 ```mermaid
 flowchart LR
     MIC[Browser microphone] -->|PCM16 16 kHz| WS[WebSocket session]
-    CANVAS[Canvas events] --> WS
+    CANVAS[Excalidraw scene] --> REDUCER[Semantic diagram reducer]
+    REDUCER -->|canvas.snapshot| WS
     WS --> FRAMES[512-sample frame buffer]
     FRAMES --> VAD[Silero ONNX VAD]
     VAD --> SEGMENT[Utterance segmenter]
     SEGMENT --> QUEUE[Transcription queue]
     QUEUE --> STT[faster-whisper base.en]
     STT --> GATE[Canvas-aware turn gate]
-    CANVAS --> GATE
+    WS --> GATE
     GATE --> LLM[Mock, Databricks, or Azure Foundry LLM]
     LLM --> TTS[Kokoro-82M INT8 or mock TTS]
     TTS -->|PCM16 audio event| WS
@@ -73,7 +74,7 @@ The default `MockInterviewLLM` exercises grounding and question generation witho
 
 - Databricks uses its OpenAI-compatible Responses endpoint and bearer authentication.
 - Azure AI Foundry uses model-inference Chat Completions and `api-key` authentication.
-- Candidate transcript and diagram context are serialized as explicitly untrusted JSON evidence.
+- Candidate transcript and a compact validated diagram snapshot are serialized as explicitly untrusted JSON evidence.
 - Provider response bodies and authorization values are excluded from errors.
 - Streams are retried only before their first emitted text delta.
 - The current voice pipeline still waits for final interviewer text before batch TTS.
@@ -105,7 +106,7 @@ The turn gate responds only when all applicable conditions are satisfied:
 final transcript exists
 AND candidate is not currently speaking
 AND canvas has been quiet for the configured interval
-AND any explicit “let me draw” hold has expired
+AND any explicit "let me draw" hold has expired
 ```
 
 If speech restarts before the response begins, pending transcript fragments are retained and combined with the continuation. If the candidate starts speaking while the assistant is generating or playing audio, the response task is cancelled and an `assistant.interrupted` event tells the browser to stop playback.
@@ -133,7 +134,7 @@ Production hardening should add:
 
 ## Technical Vocabulary
 
-The client supplies a glossary during session configuration. Recent selected canvas object IDs are combined with that glossary into a bounded Whisper initial prompt.
+The client supplies a glossary during session configuration. Diagram labels and inferred roles, with selected components first, are combined with that glossary into a bounded Whisper initial prompt. Opaque Excalidraw IDs are never used as vocabulary.
 
 Good glossary entries are unusual, high-value terms:
 
@@ -182,6 +183,7 @@ If transcript persistence is added, define consent, retention, encryption, delet
 | Empty transcript | No interviewer response | Track silence/no-speech metric |
 | LLM/TTS failure | Emits `response_failed` | Provider fallback and text-only response |
 | Invalid JSON control event | Emits `invalid_json` | Add schema version negotiation |
+| Invalid diagram snapshot | Emits `invalid_diagram` and retains prior state | Report client/schema mismatch |
 | Browser disconnect | Cancels tasks and clears VAD state | Resume session from durable event log |
 
 ## Latency Budget
@@ -204,9 +206,9 @@ The VAD silence and canvas quiet periods overlap where possible. They should not
 ## Next Implementation Steps
 
 1. Stream Kokoro synthesis at clause boundaries behind the existing protocol.
-2. Add a structured diagram reducer instead of the drawing stub.
-3. Attach selected object IDs and semantic diagram deltas to each transcript turn.
+2. Add phase, rubric, evidence, and adaptive follow-up state to the interview engine.
+3. Add an explicit system-design component palette that writes semantic roles into Excalidraw `customData`.
 4. Add speculative LLM generation after a high-confidence eager endpoint, with cancellation.
-5. Add replayable session-event fixtures and latency traces.
+5. Add replayable audio-plus-diagram session fixtures and latency traces.
 6. Add provider fallbacks and circuit breakers.
 7. Test on low-end Windows hardware and expected candidate accents.
