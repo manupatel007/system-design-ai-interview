@@ -57,6 +57,7 @@ async def test_databricks_responses_contract() -> None:
     assert isinstance(body, dict)
     assert body["model"] == "interviewer-model"
     assert "candidateTranscript" in body["input"][1]["content"]
+    assert "temperature" not in body
 
 
 @pytest.mark.asyncio

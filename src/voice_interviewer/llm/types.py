@@ -30,7 +30,7 @@ class LLMJsonSchema:
 class LLMRequest:
     messages: tuple[LLMMessage, ...]
     max_output_tokens: int = 160
-    temperature: float | None = 0.2
+    temperature: float | None = None
     response_schema: LLMJsonSchema | None = None
 
 

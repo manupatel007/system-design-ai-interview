@@ -13,6 +13,8 @@ The gateway normalizes:
 - Server-sent event text deltas.
 - Timeouts, bounded retries, and secret-safe failures.
 
+Optional sampler fields such as `temperature` are omitted by default because some reasoning-oriented models reject them. Callers may still set them explicitly for compatible deployments.
+
 ## Provider Matrix
 
 | Backend | Wire format | Authentication | Endpoint construction |
