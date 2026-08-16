@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voice Interviewer Scaffold</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">Local-first prototype</p>
+          <h1>System Design Voice Interviewer</h1>
+        </div>
+        <span id="status" class="status">Disconnected</span>
+      </header>
+
+      <section class="configuration panel">
+        <label>
+          Interview problem
+          <input id="problem" value="Design a URL shortener" />
+        </label>
+        <label>
+          Technical glossary
+          <input id="glossary" value="Kafka, Redis, PostgreSQL, gRPC, p99, QPS" />
+        </label>
+        <div class="actions">
+          <button id="connect">Connect</button>
+          <button id="microphone" disabled>Start microphone</button>
+          <button id="disconnect" class="secondary" disabled>Disconnect</button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <article class="panel canvas-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Canvas activity signal</p>
+              <h2>Sketch here while speaking</h2>
+            </div>
+            <button id="clear" class="secondary">Clear</button>
+          </div>
+          <canvas id="canvas" width="900" height="520"></canvas>
+        </article>
+
+        <aside class="panel transcript-panel">
+          <div>
+            <p class="eyebrow">Candidate</p>
+            <p id="candidate" class="speech">Waiting for speech…</p>
+          </div>
+          <div>
+            <p class="eyebrow">Interviewer</p>
+            <p id="interviewer" class="speech">Waiting for a completed turn…</p>
+          </div>
+          <details>
+            <summary>Event log</summary>
+            <ol id="events"></ol>
+          </details>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>
