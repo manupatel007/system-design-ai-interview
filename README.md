@@ -1,6 +1,6 @@
 # Local Voice Interviewer Scaffold
 
-Runnable local-first voice pipeline for an AI system-design interviewer. The scaffold keeps speech recognition and voice activity detection local, uses mock LLM and TTS adapters by default, and exposes a browser/WebSocket path for testing turn-taking alongside canvas activity.
+Runnable local-first voice pipeline for an AI system-design interviewer. Speech recognition, voice activity detection, and speech synthesis run locally; the interviewer LLM remains mocked by default. A browser/WebSocket path exercises turn-taking alongside canvas activity.
 
 ## Pipeline
 
@@ -10,11 +10,11 @@ Browser microphone (16 kHz PCM)
   -> faster-whisper base.en
   -> canvas-aware turn gate
   -> mock or Databricks interviewer LLM
-  -> mock or future local TTS
+  -> Kokoro-82M INT8 local TTS
   -> browser audio playback
 ```
 
-The mock mode requires no model downloads or API credentials. The production-oriented local mode uses the pinned Silero ONNX model and the `Systran/faster-whisper-base.en` checkpoint.
+The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Kokoro-82M v1.0 INT8 artifacts. `--mock` remains available for dependency-free protocol tests. No API credentials are required unless the disabled Databricks adapter is selected.
 
 ## Requirements
 
@@ -37,8 +37,9 @@ This command:
 2. Installs dependencies with uv using `.cache\uv`.
 3. Downloads Silero VAD to `.models\silero-vad`.
 4. Downloads faster-whisper `base.en` to `.models\faster-whisper-base.en`.
-5. Downloads a small pinned speech sample to `.cache\test-assets`.
-6. Prints a sanitized readiness report.
+5. Downloads Kokoro INT8 and its voice pack to `.models\kokoro`.
+6. Downloads a small pinned speech sample to `.cache\test-assets`.
+7. Prints a sanitized readiness report.
 
 To install dependencies without model weights:
 
@@ -55,14 +56,14 @@ For an immediate end-to-end mock demonstration:
 uv run voice-interviewer serve --mock
 ```
 
-For local Silero VAD and `base.en` transcription with mock Databricks/TTS:
+For local Silero VAD, `base.en` transcription, Kokoro speech, and the mock interviewer LLM:
 
 ```powershell
 . .\scripts\env.ps1
 uv run voice-interviewer serve
 ```
 
-Open `http://127.0.0.1:8000`, connect, start the microphone, and draw on the canvas while speaking. The mock TTS emits an audible tone sequence to verify playback and interruption without pretending to be production speech.
+Open `http://127.0.0.1:8000`, connect, start the microphone, and draw on the canvas while speaking. Kokoro synthesizes each interviewer response locally and the browser plays its 24 kHz PCM output.
 
 ## Validate Local STT
 
@@ -72,6 +73,21 @@ uv run python scripts/smoke_transcribe.py
 ```
 
 The smoke test runs the local `base.en` adapter against the pinned JFK WAV sample. It makes no paid API calls.
+
+## Validate Local TTS
+
+```powershell
+. .\scripts\env.ps1
+uv run python scripts/smoke_tts.py
+```
+
+This creates `.runtime\kokoro-smoke.wav` with real local speech. The first run includes ONNX and phonemizer warm-up; later responses reuse the loaded engine.
+
+With the normal server running, exercise one complete real voice turn with:
+
+```powershell
+uv run python scripts/smoke_voice_turn.py
+```
 
 ## Tests and Lint
 
@@ -91,7 +107,10 @@ Copy `.env.example` values into your process environment as needed. The server d
 | `VOICE_STT_MODEL` | `base.en` | Local Whisper model name |
 | `VOICE_VAD_BACKEND` | `silero` | `silero` or development-only `energy` |
 | `VOICE_LLM_BACKEND` | `mock` | `mock` or `databricks` |
-| `VOICE_TTS_BACKEND` | `mock` | Mock tone adapter until a local TTS is selected |
+| `VOICE_TTS_BACKEND` | `kokoro` | `kokoro` or `mock` |
+| `VOICE_TTS_VOICE` | `af_heart` | Voice key from the Kokoro v1.0 voice pack |
+| `VOICE_TTS_LANGUAGE` | `en-us` | Phonemizer language, normally `en-us` or `en-gb` |
+| `VOICE_TTS_SPEED` | `1.0` | Speech speed from `0.5` to `2.0` |
 | `VOICE_VAD_MIN_SILENCE_MS` | `1200` | Patient speech endpointing for interviews |
 | `VOICE_CANVAS_QUIET_MS` | `1500` | Canvas inactivity required before a response |
 
@@ -103,7 +122,7 @@ When `VOICE_LLM_BACKEND=databricks`, set `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, 
 - `base.en` is English-only and must be evaluated on expected accents and technical vocabulary.
 - Silero VAD determines speech boundaries; the separate turn gate decides whether the candidate has yielded the floor.
 - The canvas is a signaling stub, not the final structured architecture editor.
-- Mock TTS verifies the protocol and barge-in path but is not natural speech.
+- Kokoro currently synthesizes a full response before sending one PCM chunk; clause streaming remains future work.
 - Raw audio is held only for the active utterance and is not persisted.
 
 See `docs/VOICE_PIPELINE.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.

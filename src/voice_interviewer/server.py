@@ -57,6 +57,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "models": {
                 "stt": active_settings.stt_model,
                 "sileroReady": active_settings.silero_model_path.is_file(),
+                "ttsVoice": active_settings.tts_voice,
+                "kokoroReady": active_settings.kokoro_model_path.is_file()
+                and active_settings.kokoro_voices_path.is_file(),
             },
         }
 

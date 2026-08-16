@@ -225,6 +225,10 @@ class InterviewSessionPipeline:
                 sampleRate=audio.sample_rate,
                 channels=audio.channels,
             )
+            playback_seconds = len(audio.pcm_s16le) / (
+                2 * audio.channels * audio.sample_rate
+            )
+            await asyncio.sleep(playback_seconds)
             await self._emit("assistant.response.completed")
             self._assistant_active = False
         except asyncio.CancelledError:

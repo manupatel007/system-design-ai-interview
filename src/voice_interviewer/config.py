@@ -46,6 +46,11 @@ class Settings:
     explicit_hold_ms: int
     llm_backend: str
     tts_backend: str
+    kokoro_model_path: Path
+    kokoro_voices_path: Path
+    tts_voice: str
+    tts_language: str
+    tts_speed: float
     databricks_host: str | None
     databricks_token: str | None
     databricks_model: str
@@ -75,7 +80,16 @@ class Settings:
             canvas_quiet_ms=_integer("VOICE_CANVAS_QUIET_MS", 1_500),
             explicit_hold_ms=_integer("VOICE_EXPLICIT_HOLD_MS", 10_000),
             llm_backend=os.getenv("VOICE_LLM_BACKEND", "mock"),
-            tts_backend=os.getenv("VOICE_TTS_BACKEND", "mock"),
+            tts_backend=os.getenv("VOICE_TTS_BACKEND", "kokoro"),
+            kokoro_model_path=_project_path(
+                "VOICE_TTS_MODEL_PATH", ".models/kokoro/kokoro-v1.0.int8.onnx"
+            ),
+            kokoro_voices_path=_project_path(
+                "VOICE_TTS_VOICES_PATH", ".models/kokoro/voices-v1.0.bin"
+            ),
+            tts_voice=os.getenv("VOICE_TTS_VOICE", "af_heart"),
+            tts_language=os.getenv("VOICE_TTS_LANGUAGE", "en-us"),
+            tts_speed=_floating("VOICE_TTS_SPEED", 1.0),
             databricks_host=os.getenv("DATABRICKS_HOST") or None,
             databricks_token=os.getenv("DATABRICKS_TOKEN") or None,
             databricks_model=os.getenv(

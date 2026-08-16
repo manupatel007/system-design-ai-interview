@@ -31,7 +31,7 @@ flowchart LR
     STT --> GATE[Canvas-aware turn gate]
     CANVAS --> GATE
     GATE --> LLM[Mock or Databricks LLM]
-    LLM --> TTS[Mock or local TTS adapter]
+    LLM --> TTS[Kokoro-82M INT8 or mock TTS]
     TTS -->|PCM16 audio event| WS
     WS --> PLAYBACK[Browser playback]
 ```
@@ -83,15 +83,18 @@ No Databricks call is made unless `VOICE_LLM_BACKEND=databricks` and both requir
 
 ### Text To Speech
 
-`ToneMockTTS` generates deterministic PCM tones. It proves audio serialization, playback, cancellation, and event ordering without implying production voice quality.
+- Model: Kokoro-82M v1.0 INT8 ONNX
+- Runtime: `kokoro-onnx` with ONNX Runtime CPU execution
+- Default voice: `af_heart`, configurable without changing model weights
+- Output: mono signed PCM16 at 24 kHz
+- Model footprint: approximately 88 MiB plus a 27 MiB voice pack
+- Licenses: MIT adapter/runtime package and Apache-2.0 model
 
-The next TTS adapter should implement the existing `TextToSpeech` protocol. The leading local candidate is Kokoro-82M, subject to a latency, pronunciation, and licensing evaluation. Production TTS should support:
+The model and voice pack are checksum-pinned by `scripts/download_models.py`. `KokoroTTS` loads them lazily, retains one engine for the process, and serializes synthesis because the phonemizer and ONNX session are shared. Text, voice, language, and speed stay local.
 
-- Clause-level incremental input.
-- PCM streaming output.
-- Immediate cancellation.
-- Pronunciation overrides for technical terms.
-- Exact reporting of text actually played when possible.
+The current adapter generates a complete short interviewer utterance before emitting one audio event. Cancellation stops delivery immediately, while an already-running native inference finishes in its worker thread before that shared engine is reused. Future hardening should add clause streaming, pronunciation overrides for technical terms, and played-text reconciliation.
+
+`ToneMockTTS` remains available under `--mock` for fast deterministic protocol tests.
 
 ## Turn Ownership
 
@@ -153,6 +156,7 @@ Avoid large lists of common words. Store the raw transcript separately from any 
 - One WebSocket session owns its VAD recurrent state, segmenter, turn gate, and event sequence.
 - A per-session queue prevents audio reception from blocking during transcription.
 - The STT adapter and loaded model are shared across sessions.
+- The TTS adapter and loaded model are shared, with synthesis serialized by a lock.
 - Response tasks are independently cancellable.
 - WebSocket sends are serialized by an asynchronous lock.
 
@@ -174,6 +178,7 @@ If transcript persistence is added, define consent, retention, encryption, delet
 | Failure | Current behavior | Production follow-up |
 | --- | --- | --- |
 | Silero model missing | WebSocket closes with `session_start_failed` | Surface guided download action |
+| Kokoro files missing | Emits `response_failed` on first response | Surface guided download action before session start |
 | STT inference failure | Emits `transcription_failed` | Retry once, then offer text input |
 | Empty transcript | No interviewer response | Track silence/no-speech metric |
 | LLM/TTS failure | Emits `response_failed` | Provider fallback and text-only response |
@@ -192,13 +197,14 @@ Initial targets for the target development machine:
 | Canvas gate after final edit | 1,500 ms |
 | Live LLM first token | under 800 ms p95 |
 | TTS first audio | under 250 ms p95 |
+| Warm Kokoro synthesis | under 1.0 real-time factor |
 | End of candidate turn to first audio | under 2 seconds p95 |
 
-The VAD silence and canvas quiet periods overlap where possible. They should not be blindly summed in product latency calculations.
+The VAD silence and canvas quiet periods overlap where possible. They should not be blindly summed in product latency calculations. The first-audio targets require the planned clause-streaming TTS path; the current full-response adapter is a functional baseline.
 
 ## Next Implementation Steps
 
-1. Add clause-streaming local TTS behind the existing protocol.
+1. Stream Kokoro synthesis at clause boundaries behind the existing protocol.
 2. Add a structured diagram reducer instead of the drawing stub.
 3. Attach selected object IDs and semantic diagram deltas to each transcript turn.
 4. Add speculative LLM generation after a high-confidence eager endpoint, with cancellation.

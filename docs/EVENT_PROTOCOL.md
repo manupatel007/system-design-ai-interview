@@ -6,7 +6,7 @@
 - Client audio: binary WebSocket messages containing mono PCM signed 16-bit little-endian samples at 16 kHz.
 - Client controls: JSON text messages.
 - Server events: JSON text messages.
-- Server audio: base64 PCM in `assistant.audio.chunk` for the scaffold.
+- Server audio: base64 PCM in `assistant.audio.chunk`; each event declares its sample rate. Kokoro currently emits mono 24 kHz output.
 
 Production deployments may move assistant audio to a dedicated WebRTC track while retaining the JSON data channel for control events.
 
@@ -112,7 +112,7 @@ When candidate speech is confirmed during an active assistant response:
 4. Candidate audio continues through VAD and STT.
 5. The next interviewer prompt should not assume unheard response content.
 
-The scaffold tracks whether the response was active, but it does not yet report exact text or audio duration played. A streaming TTS adapter should add played-text reconciliation.
+The scaffold tracks whether the response was active, but it does not yet report exact text or audio duration played. Kokoro currently generates a full utterance before the audio event; the planned streaming adapter should add played-text reconciliation.
 
 ## Errors
 

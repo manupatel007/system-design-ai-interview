@@ -66,6 +66,14 @@ Generate problem-specific glossary variants and test both with and without Whisp
 - Percentage of questions grounded in actual transcript/diagram evidence.
 - Human rating of timing, relevance, and concision.
 
+### Speech Synthesis
+
+- Kokoro model load time and warm synthesis real-time factor.
+- Time from final response text to the first playable audio sample.
+- Critical technical-term pronunciation accuracy.
+- Human ratings for clarity, pace, naturalness, and interviewer tone.
+- Clipping, empty audio, or unexpected sample-rate incidence.
+
 ### Reliability
 
 - Session startup success rate.
@@ -88,6 +96,8 @@ These are product hypotheses to validate, not universal benchmarks:
 | Barge-in playback stop p95 | below 200 ms |
 | Final STT decode p95 on target CPU | below 600 ms |
 | Turn end to first assistant audio p95 | below 2 seconds |
+| Local Kokoro smoke success | 100% on supported development machines |
+| Critical-term pronunciation approval | at least 95% in human review |
 
 If `base.en` misses the critical-term gate, test in this order:
 

@@ -5,7 +5,7 @@ from voice_interviewer.errors import ConfigurationError
 from voice_interviewer.llm import DatabricksLLM, MockInterviewLLM
 from voice_interviewer.models import InterviewLanguageModel, SpeechToText, TextToSpeech
 from voice_interviewer.stt import FasterWhisperSTT, MockSTT
-from voice_interviewer.tts import ToneMockTTS
+from voice_interviewer.tts import KokoroTTS, ToneMockTTS
 
 
 def create_stt(settings: Settings) -> SpeechToText:
@@ -37,4 +37,12 @@ def create_llm(settings: Settings) -> InterviewLanguageModel:
 def create_tts(settings: Settings) -> TextToSpeech:
     if settings.tts_backend == "mock":
         return ToneMockTTS(sample_rate=settings.sample_rate)
+    if settings.tts_backend == "kokoro":
+        return KokoroTTS(
+            model_path=settings.kokoro_model_path,
+            voices_path=settings.kokoro_voices_path,
+            voice=settings.tts_voice,
+            language=settings.tts_language,
+            speed=settings.tts_speed,
+        )
     raise ConfigurationError(f"Unsupported TTS backend: {settings.tts_backend}")

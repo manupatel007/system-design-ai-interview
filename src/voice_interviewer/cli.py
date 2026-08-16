@@ -41,6 +41,10 @@ def main() -> None:
                     "sttBackend": settings.stt_backend,
                     "sttModel": settings.stt_model,
                     "sileroReady": settings.silero_model_path.is_file(),
+                    "ttsBackend": settings.tts_backend,
+                    "ttsVoice": settings.tts_voice,
+                    "kokoroReady": settings.kokoro_model_path.is_file()
+                    and settings.kokoro_voices_path.is_file(),
                     "databricksConfigured": bool(
                         settings.databricks_host and settings.databricks_token
                     ),
