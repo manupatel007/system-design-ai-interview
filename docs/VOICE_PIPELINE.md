@@ -30,7 +30,7 @@ flowchart LR
     QUEUE --> STT[faster-whisper base.en]
     STT --> GATE[Canvas-aware turn gate]
     CANVAS --> GATE
-    GATE --> LLM[Mock or Databricks LLM]
+    GATE --> LLM[Mock, Databricks, or Azure Foundry LLM]
     LLM --> TTS[Kokoro-82M INT8 or mock TTS]
     TTS -->|PCM16 audio event| WS
     WS --> PLAYBACK[Browser playback]
@@ -69,17 +69,16 @@ The energy-based VAD exists only for dependency-free mock demonstrations and tes
 
 ### Language Model
 
-The default `MockInterviewLLM` exercises grounding and question generation without making network calls. It produces one concise question based on the latest transcript or diagram delta.
+The default `MockInterviewLLM` exercises grounding and question generation without making network calls. Remote providers share a normalized gateway that supports messages, bounded output, strict JSON Schema output, final responses, SSE deltas, timeout handling, and bounded transient retries.
 
-The disabled-by-default Databricks adapter:
+- Databricks uses its OpenAI-compatible Responses endpoint and bearer authentication.
+- Azure AI Foundry uses model-inference Chat Completions and `api-key` authentication.
+- Candidate transcript and diagram context are serialized as explicitly untrusted JSON evidence.
+- Provider response bodies and authorization values are excluded from errors.
+- Streams are retried only before their first emitted text delta.
+- The current voice pipeline still waits for final interviewer text before batch TTS.
 
-- Uses the Databricks OpenAI-compatible Responses endpoint.
-- Reads credentials only on the backend.
-- Sends transcript and compact diagram context, never raw audio.
-- Limits the response to a short interviewer utterance.
-- Does not log or return the bearer token.
-
-No Databricks call is made unless `VOICE_LLM_BACKEND=databricks` and both required credential variables are present.
+No remote request is made unless its `VOICE_LLM_BACKEND` value and required credential variables are explicitly configured. See `docs/LLM_PROVIDERS.md` for the complete contract and setup.
 
 ### Text To Speech
 
@@ -168,7 +167,7 @@ Before multi-session deployment, benchmark CTranslate2 worker and CPU-thread set
 - The scaffold does not record audio.
 - Model weights and caches remain inside `.models` and `.cache` on `F:`.
 - `.env`, caches, model weights, and runtime data are Git-ignored.
-- Databricks credentials never reach browser JavaScript.
+- Databricks and Azure Foundry credentials never reach browser JavaScript.
 - The server does not automatically load `.env` files.
 
 If transcript persistence is added, define consent, retention, encryption, deletion, and access-control policies before enabling it.

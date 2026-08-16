@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from voice_interviewer.config import Settings
 from voice_interviewer.errors import ConfigurationError
-from voice_interviewer.llm import DatabricksLLM, MockInterviewLLM
+from voice_interviewer.llm import AzureFoundryLLM, DatabricksLLM, MockInterviewLLM
 from voice_interviewer.models import InterviewLanguageModel, SpeechToText, TextToSpeech
 from voice_interviewer.stt import FasterWhisperSTT, MockSTT
 from voice_interviewer.tts import KokoroTTS, ToneMockTTS
@@ -30,6 +30,19 @@ def create_llm(settings: Settings) -> InterviewLanguageModel:
             host=settings.databricks_host,
             token=settings.databricks_token,
             model=settings.databricks_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+            use_streaming=settings.llm_streaming,
+        )
+    if settings.llm_backend == "azure_foundry":
+        return AzureFoundryLLM(
+            endpoint=settings.azure_foundry_endpoint,
+            api_key=settings.azure_foundry_api_key,
+            model=settings.azure_foundry_model,
+            api_version=settings.azure_foundry_api_version,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+            use_streaming=settings.llm_streaming,
         )
     raise ConfigurationError(f"Unsupported LLM backend: {settings.llm_backend}")
 

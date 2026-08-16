@@ -30,6 +30,9 @@ def mock_settings() -> Settings:
         canvas_quiet_ms=20,
         explicit_hold_ms=50,
         llm_backend="mock",
+        llm_timeout_seconds=2.0,
+        llm_max_retries=0,
+        llm_streaming=False,
         tts_backend="mock",
         kokoro_model_path=PROJECT_ROOT / ".models" / "kokoro" / "kokoro-v1.0.int8.onnx",
         kokoro_voices_path=PROJECT_ROOT / ".models" / "kokoro" / "voices-v1.0.bin",
@@ -39,6 +42,10 @@ def mock_settings() -> Settings:
         databricks_host=None,
         databricks_token=None,
         databricks_model="databricks-gpt-5-6-sol",
+        azure_foundry_endpoint=None,
+        azure_foundry_api_key=None,
+        azure_foundry_model="gpt-4.1-mini",
+        azure_foundry_api_version="2024-05-01-preview",
     )
 
 

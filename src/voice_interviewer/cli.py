@@ -48,6 +48,9 @@ def main() -> None:
                     "databricksConfigured": bool(
                         settings.databricks_host and settings.databricks_token
                     ),
+                    "azureFoundryConfigured": bool(
+                        settings.azure_foundry_endpoint and settings.azure_foundry_api_key
+                    ),
                 },
                 indent=2,
             )

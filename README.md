@@ -9,12 +9,12 @@ Browser microphone (16 kHz PCM)
   -> Silero VAD
   -> faster-whisper base.en
   -> canvas-aware turn gate
-  -> mock or Databricks interviewer LLM
+  -> mock, Databricks, or Azure Foundry interviewer LLM
   -> Kokoro-82M INT8 local TTS
   -> browser audio playback
 ```
 
-The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Kokoro-82M v1.0 INT8 artifacts. `--mock` remains available for dependency-free protocol tests. No API credentials are required unless the disabled Databricks adapter is selected.
+The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Kokoro-82M v1.0 INT8 artifacts. `--mock` remains available for dependency-free protocol tests. No API credentials are required unless a remote LLM provider is selected.
 
 ## Requirements
 
@@ -106,7 +106,10 @@ Copy `.env.example` values into your process environment as needed. The server d
 | `VOICE_STT_BACKEND` | `faster-whisper` | `faster-whisper` or `mock` |
 | `VOICE_STT_MODEL` | `base.en` | Local Whisper model name |
 | `VOICE_VAD_BACKEND` | `silero` | `silero` or development-only `energy` |
-| `VOICE_LLM_BACKEND` | `mock` | `mock` or `databricks` |
+| `VOICE_LLM_BACKEND` | `mock` | `mock`, `databricks`, or `azure_foundry` |
+| `VOICE_LLM_TIMEOUT_SECONDS` | `30` | Remote provider request timeout |
+| `VOICE_LLM_MAX_RETRIES` | `2` | Bounded transient-failure retries |
+| `VOICE_LLM_STREAMING` | `false` | Consume provider SSE through the common gateway |
 | `VOICE_TTS_BACKEND` | `kokoro` | `kokoro` or `mock` |
 | `VOICE_TTS_VOICE` | `af_heart` | Voice key from the Kokoro v1.0 voice pack |
 | `VOICE_TTS_LANGUAGE` | `en-us` | Phonemizer language, normally `en-us` or `en-gb` |
@@ -114,7 +117,7 @@ Copy `.env.example` values into your process environment as needed. The server d
 | `VOICE_VAD_MIN_SILENCE_MS` | `1200` | Patient speech endpointing for interviews |
 | `VOICE_CANVAS_QUIET_MS` | `1500` | Canvas inactivity required before a response |
 
-When `VOICE_LLM_BACKEND=databricks`, set `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, and optionally `DATABRICKS_MODEL`. Never commit or paste the token into the browser. The backend is disabled by default and tests never call it.
+Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databricks and Azure AI Foundry endpoint, credential, retry, streaming, and structured-output configuration. Never commit credentials or paste them into the browser; provider contract tests use mock HTTP transports only.
 
 ## Current Boundaries
 
@@ -125,4 +128,4 @@ When `VOICE_LLM_BACKEND=databricks`, set `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, 
 - Kokoro currently synthesizes a full response before sending one PCM chunk; clause streaming remains future work.
 - Raw audio is held only for the active utterance and is not persisted.
 
-See `docs/VOICE_PIPELINE.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.
+See `docs/VOICE_PIPELINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.
