@@ -12,6 +12,7 @@ from voice_interviewer.audio import AudioFrameBuffer, pcm16_bytes_to_float32
 from voice_interviewer.config import Settings
 from voice_interviewer.diagram import DiagramSnapshot, DiagramValidationError
 from voice_interviewer.events import ClientState, EventFactory
+from voice_interviewer.interview.engine import InterviewEngineResult, StructuredInterviewEngine
 from voice_interviewer.models import (
     InterviewContext,
     InterviewLanguageModel,
@@ -44,6 +45,7 @@ class InterviewSessionPipeline:
         self.tts = tts
         self.vad = vad
         self._send_event = send_event
+        self._interview = StructuredInterviewEngine(llm)
         self._events = EventFactory(session_id)
         self._client = ClientState()
         self._frames = AudioFrameBuffer(vad.frame_samples)
@@ -98,7 +100,10 @@ class InterviewSessionPipeline:
         if event_type == "session.configure":
             self._client.problem = _optional_string(values.get("problem"))
             self._client.glossary = _string_list(values.get("glossary"))
+            interview_state = self._interview.configure(self._client.problem)
             await self._emit("session.configured")
+            await self._emit("interview.state", **interview_state)
+            self._schedule_interview_start()
             return
         if event_type == "canvas.snapshot":
             try:
@@ -138,6 +143,20 @@ class InterviewSessionPipeline:
             self._client.selected_object_ids = _string_list(values.get("selectedObjectIds"))
             self._turn_gate.on_canvas_activity(now)
             self._schedule_response()
+            return
+        if event_type == "interview.finish":
+            await self._transcription_queue.join()
+            pending_transcript = self._turn_gate.force_consume() or ""
+            interrupted = self._assistant_active
+            if self._response_task and not self._response_task.done():
+                self._response_task.cancel()
+            self._assistant_active = False
+            if interrupted:
+                await self._emit("assistant.interrupted", reason="interview_finished")
+            self._response_task = asyncio.create_task(
+                self._finalize_interview(pending_transcript),
+                name=f"finalize-{self.session_id}",
+            )
             return
         if event_type == "audio.flush":
             await self._flush_audio()
@@ -227,28 +246,49 @@ class InterviewSessionPipeline:
             self._respond_after(delay), name=f"response-{self.session_id}"
         )
 
+    def _schedule_interview_start(self) -> None:
+        if self._closed:
+            return
+        if self._response_task and not self._response_task.done():
+            self._response_task.cancel()
+        self._response_task = asyncio.create_task(
+            self._start_interview_after(0.25),
+            name=f"interview-start-{self.session_id}",
+        )
+
     async def _respond_after(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        transcript = self._turn_gate.consume(time.monotonic())
+        if transcript is None:
+            self._schedule_response()
+            return
+        context = self._interview_context(transcript)
+        self._client.recent_diagram_delta = None
+        await self._execute_interview(lambda: self._interview.respond(context))
+
+    async def _start_interview_after(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        context = self._interview_context()
+        await self._execute_interview(lambda: self._interview.start(context))
+        self._client.recent_diagram_delta = None
+
+    async def _finalize_interview(self, transcript: str = "") -> None:
+        context = self._interview_context(transcript)
+        await self._execute_interview(lambda: self._interview.finalize(context))
+
+    async def _execute_interview(
+        self,
+        producer: Callable[[], Awaitable[InterviewEngineResult]],
+    ) -> None:
         try:
-            await asyncio.sleep(delay)
-            transcript = self._turn_gate.consume(time.monotonic())
-            if transcript is None:
-                self._schedule_response()
-                return
             self._assistant_active = True
             await self._emit("assistant.response.started")
-            context = InterviewContext(
-                session_id=self.session_id,
-                problem=self._client.problem,
-                transcript=transcript,
-                recent_diagram_delta=self._client.recent_diagram_delta,
-                selected_object_ids=tuple(self._client.selected_object_ids),
-                glossary=tuple(self._client.glossary),
-                diagram=self._client.diagram_snapshot,
-            )
-            self._client.recent_diagram_delta = None
-            response_text = await self.llm.respond(context)
-            await self._emit("assistant.text.final", text=response_text)
-            audio = await self.tts.synthesize(response_text)
+            result = await producer()
+            await self._emit("interview.state", **result.state)
+            if result.feedback:
+                await self._emit("interview.feedback", **result.feedback.to_dict())
+            await self._emit("assistant.text.final", text=result.text)
+            audio = await self.tts.synthesize(result.text)
             await self._emit(
                 "assistant.audio.chunk",
                 audio=base64.b64encode(audio.pcm_s16le).decode("ascii"),
@@ -268,6 +308,17 @@ class InterviewSessionPipeline:
         except Exception as error:
             self._assistant_active = False
             await self._emit("error", code="response_failed", message=str(error))
+
+    def _interview_context(self, transcript: str = "") -> InterviewContext:
+        return InterviewContext(
+            session_id=self.session_id,
+            problem=self._client.problem,
+            transcript=transcript,
+            recent_diagram_delta=self._client.recent_diagram_delta,
+            selected_object_ids=tuple(self._client.selected_object_ids),
+            glossary=tuple(self._client.glossary),
+            diagram=self._client.diagram_snapshot,
+        )
 
     def _stt_prompt(self) -> str | None:
         diagram_terms = (

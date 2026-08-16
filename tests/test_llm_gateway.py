@@ -98,6 +98,113 @@ async def test_azure_foundry_chat_completions_contract() -> None:
 
 
 @pytest.mark.asyncio
+async def test_databricks_returns_structured_interview_plan() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"output_text": json.dumps(_interview_plan_payload())})
+
+    llm = DatabricksLLM(
+        host="https://workspace.example",
+        token="secret-databricks-token",
+        model="interviewer-model",
+        transport=httpx.MockTransport(handler),
+    )
+    plan = await llm.plan(
+        InterviewContext(
+            session_id="test",
+            transcript="Redirects require low latency.",
+            turn_mode="candidate",
+            interview_state={
+                "phase": "requirements",
+                "currentQuestion": {"text": "What latency do you need?"},
+            },
+        )
+    )
+
+    assert plan.utterance == "That establishes latency. What scale should we support?"
+    assert plan.next_phase.value == "estimation"
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["text"]["format"]["name"] == "interview_turn_plan"
+    assert body["max_output_tokens"] == 1_200
+    evidence = json.loads(body["input"][1]["content"].split("\n", 1)[1])
+    assert evidence["turnMode"] == "candidate"
+    assert evidence["interviewState"]["phase"] == "requirements"
+
+
+@pytest.mark.asyncio
+async def test_azure_foundry_returns_structured_interview_plan() -> None:
+    captured: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"content": json.dumps(_interview_plan_payload())}}
+                ]
+            },
+        )
+
+    llm = AzureFoundryLLM(
+        endpoint="https://foundry.example/models",
+        api_key="secret-azure-key",
+        model="deployment-name",
+        transport=httpx.MockTransport(handler),
+    )
+    plan = await llm.plan(
+        InterviewContext(
+            session_id="test",
+            transcript="Redirects require low latency.",
+            interview_state={"phase": "requirements"},
+        )
+    )
+
+    assert plan.question_status.value == "answered"
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["response_format"]["json_schema"]["name"] == "interview_turn_plan"
+    assert body["max_tokens"] == 1_200
+
+
+@pytest.mark.asyncio
+async def test_structured_interview_plan_can_stream_before_validation() -> None:
+    plan_text = json.dumps(_interview_plan_payload())
+    midpoint = len(plan_text) // 2
+    events = [
+        {"type": "response.output_text.delta", "delta": plan_text[:midpoint]},
+        {"type": "response.output_text.delta", "delta": plan_text[midpoint:]},
+        {"type": "response.completed"},
+    ]
+    content = "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode()
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=content,
+            headers={"Content-Type": "text/event-stream"},
+        )
+
+    llm = DatabricksLLM(
+        host="https://workspace.example",
+        token="secret-databricks-token",
+        model="interviewer-model",
+        use_streaming=True,
+        transport=httpx.MockTransport(handler),
+    )
+
+    plan = await llm.plan(
+        InterviewContext(session_id="test", interview_state={"phase": "requirements"})
+    )
+
+    assert plan.next_question.topic == "capacity estimation"
+    assert plan.evidence_updates[0].summary == "Redirects require low latency."
+
+
+@pytest.mark.asyncio
 async def test_gateway_parses_structured_chat_output() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -258,3 +365,43 @@ def test_settings_repr_redacts_provider_secrets(mock_settings) -> None:
 
 def _request() -> LLMRequest:
     return LLMRequest(messages=(LLMMessage(role="user", content="Ask a question"),))
+
+
+def _interview_plan_payload() -> dict[str, object]:
+    return {
+        "candidateIntent": "answer",
+        "action": "transition",
+        "questionStatus": "answered",
+        "acknowledgement": "That establishes latency.",
+        "utterance": "That establishes latency. What scale should we support?",
+        "evidenceUpdates": [
+            {
+                "competency": "requirements_scope",
+                "summary": "Redirects require low latency.",
+                "source": "transcript",
+                "objectIds": [],
+            }
+        ],
+        "rubricUpdates": [
+            {
+                "competency": "requirements_scope",
+                "level": "some_evidence",
+                "rationale": "Candidate stated a latency constraint.",
+            }
+        ],
+        "assumptions": [],
+        "decisions": [],
+        "coveredTopics": ["latency"],
+        "nextPhase": "estimation",
+        "nextQuestion": {
+            "text": "What scale should we support?",
+            "topic": "capacity estimation",
+            "expectedEvidence": ["capacity_estimation"],
+        },
+        "finalFeedback": {
+            "summary": "",
+            "strengths": [],
+            "improvements": [],
+            "notDiscussed": [],
+        },
+    }

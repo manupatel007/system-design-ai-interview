@@ -6,6 +6,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from voice_interviewer.diagram import DiagramSnapshot
+from voice_interviewer.interview.models import InterviewTurnPlan
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,8 @@ class InterviewContext:
     glossary: tuple[str, ...] = ()
     diagram: DiagramSnapshot | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    interview_state: dict[str, Any] = field(default_factory=dict)
+    turn_mode: str = "candidate"
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +53,8 @@ class SpeechToText(Protocol):
 
 
 class InterviewLanguageModel(Protocol):
+    async def plan(self, context: InterviewContext) -> InterviewTurnPlan: ...
+
     async def respond(self, context: InterviewContext) -> str: ...
 
 

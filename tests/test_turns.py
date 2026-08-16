@@ -37,3 +37,23 @@ def test_explicit_drawing_phrase_holds_floor() -> None:
 
     assert gate.consume(10.9) is None
     assert gate.consume(11.1) == "Let me draw the request flow."
+
+
+def test_curly_apostrophe_drawing_phrase_holds_floor() -> None:
+    gate = TurnGate(canvas_quiet_seconds=0, explicit_hold_seconds=10)
+    gate.on_speech_ended(1.0)
+    gate.on_transcript("I’ll sketch the data flow.", 1.1)
+
+    assert gate.consume(10.9) is None
+    assert gate.consume(11.1) == "I’ll sketch the data flow."
+
+
+def test_force_consume_drains_pending_transcript_for_finish() -> None:
+    gate = TurnGate(canvas_quiet_seconds=5, explicit_hold_seconds=10)
+    gate.on_speech_ended(1.0)
+    gate.on_transcript("My final improvement is regional failover.", 1.1)
+    gate.on_canvas_activity(1.2)
+
+    assert gate.consume(1.3) is None
+    assert gate.force_consume() == "My final improvement is regional failover."
+    assert gate.force_consume() is None

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Voice Interviewer Scaffold</title>
+    <title>System Design Voice Interviewer</title>
     <link rel="stylesheet" href="/static/styles.css" />
     <link rel="stylesheet" href="/static/excalidraw/diagram-app.css" />
   </head>
@@ -29,6 +29,7 @@
         <div class="actions">
           <button id="connect">Connect</button>
           <button id="microphone" disabled>Start microphone</button>
+          <button id="finish" class="secondary" disabled>Finish interview</button>
           <button id="disconnect" class="secondary" disabled>Disconnect</button>
         </div>
       </section>
@@ -49,6 +50,44 @@
         </article>
 
         <aside class="panel transcript-panel">
+          <div class="interview-structure">
+            <div class="structure-heading">
+              <div>
+                <p class="eyebrow">Interview structure</p>
+                <h2>Live conversation state</h2>
+              </div>
+              <span id="interview-phase" class="phase-chip">Not started</span>
+            </div>
+            <p class="eyebrow">Current thread</p>
+            <p id="current-question" class="current-question">Connect to begin.</p>
+            <div class="state-metrics">
+              <div>
+                <span>Evidence</span>
+                <strong id="evidence-count">0</strong>
+              </div>
+              <div>
+                <span>Rubric</span>
+                <strong id="rubric-count">0 / 9</strong>
+              </div>
+            </div>
+            <p id="covered-topics" class="state-summary">No topics covered yet.</p>
+            <p id="rubric-summary" class="state-summary">No evidence recorded yet.</p>
+            <details>
+              <summary>Structured interview state</summary>
+              <pre id="interview-json" class="diagram-json">{}</pre>
+            </details>
+          </div>
+
+          <div id="interview-feedback" class="feedback-panel" hidden>
+            <p class="eyebrow">Final feedback</p>
+            <p id="feedback-summary" class="speech"></p>
+            <h3>Strengths</h3>
+            <ul id="feedback-strengths"></ul>
+            <h3>Improvements</h3>
+            <ul id="feedback-improvements"></ul>
+            <p id="feedback-not-discussed" class="state-summary"></p>
+          </div>
+
           <div>
             <p class="eyebrow">Candidate</p>
             <p id="candidate" class="speech">Waiting for speech...</p>

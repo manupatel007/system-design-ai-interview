@@ -19,6 +19,7 @@ Minimum MVP composition:
 | Long mid-sentence thinking pauses | 30 |
 | Speech while actively drawing | 30 |
 | Structured canvas edit sequences | 30 |
+| Clarification, meta-question, and partial-answer sequences | 30 |
 | Technical terms and acronyms | 50 |
 | Barge-in during interviewer playback | 25 |
 | Pure silence and non-speech noise | 25 |
@@ -73,8 +74,16 @@ Generate problem-specific glossary variants and test both with and without Whisp
 - End of candidate turn to first assistant audio.
 - Barge-in cancellation latency.
 - Duplicate or stale interviewer response rate.
+- Active-question continuity after partial, irrelevant, or meta-question turns.
+- Direct-answer rate for candidate clarification and diagram questions.
+- Unsupported phase transition rate.
+- Percentage of acknowledgements grounded in actual candidate reasoning.
 - Percentage of questions grounded in actual transcript/diagram evidence.
+- Percentage of rubric upgrades backed by transcript or combined reasoning evidence.
+- Final-feedback distinction between weak, incorrect, and not-discussed evidence.
 - Human rating of timing, relevance, and concision.
+
+Scripted fixtures should include “Can you see my diagram?”, “Can you repeat that?”, irrelevant answers, strong answers, partial answers, contradictions, uncertainty, active drawing, explicit finish, and a final transcript flushed immediately before finish.
 
 ### Speech Synthesis
 
@@ -105,6 +114,11 @@ These are product hypotheses to validate, not universal benchmarks:
 | Response started during active drawing | below 1% |
 | Semantic extraction on checked-in fixtures | 100% |
 | Invalid diagram references accepted | 0 |
+| Deterministic diagram questions answered directly | 100% |
+| Current question preserved across meta-questions | 100% |
+| Non-adjacent phase transitions accepted | 0 |
+| Diagram-only rubric upgrades accepted | 0 |
+| Spoken questions per interviewer turn | at most 1 |
 | Barge-in playback stop p95 | below 200 ms |
 | Final STT decode p95 on target CPU | below 600 ms |
 | Turn end to first assistant audio p95 | below 2 seconds |

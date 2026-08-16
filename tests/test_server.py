@@ -17,6 +17,8 @@ def test_health_and_static_client(mock_settings) -> None:
     assert index.status_code == 200
     assert "System Design Voice Interviewer" in index.text
     assert "excalidraw-root" in index.text
+    assert "interview-phase" in index.text
+    assert "Finish interview" in index.text
     assert diagram_bundle.status_code == 200
 
 
@@ -34,9 +36,12 @@ def test_websocket_configures_mock_session(mock_settings) -> None:
                 }
             )
             configured = socket.receive_json()
+            interview_state = socket.receive_json()
 
     assert ready["type"] == "session.ready"
     assert configured["type"] == "session.configured"
+    assert interview_state["type"] == "interview.state"
+    assert interview_state["payload"]["phase"] == "introduction"
 
 
 def test_websocket_accepts_structured_canvas_snapshot(mock_settings) -> None:

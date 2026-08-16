@@ -70,16 +70,20 @@ The energy-based VAD exists only for dependency-free mock demonstrations and tes
 
 ### Language Model
 
-The default `MockInterviewLLM` exercises grounding and question generation without making network calls. Remote providers share a normalized gateway that supports messages, bounded output, strict JSON Schema output, final responses, SSE deltas, timeout handling, and bounded transient retries.
+The default `MockInterviewLLM` now exercises deterministic phase progression, question threading, evidence updates, and feedback without making network calls. Remote providers share a normalized gateway that supports messages, bounded output, strict JSON Schema output, final responses, SSE deltas, timeout handling, and bounded transient retries.
 
 - Databricks uses its OpenAI-compatible Responses endpoint and bearer authentication.
 - Azure AI Foundry uses model-inference Chat Completions and `api-key` authentication.
 - Candidate transcript and a compact validated diagram snapshot are serialized as explicitly untrusted JSON evidence.
+- A per-session engine adds the current phase, active question, assumptions, decisions, recent evidence, rubric coverage, and six recent turns.
+- Provider output is a strict plan; the local reducer controls phase adjacency and state mutation.
+- Diagram-only evidence cannot upgrade rubric coverage.
+- Direct diagram-visibility and repeat-question repairs bypass the provider.
 - Provider response bodies and authorization values are excluded from errors.
 - Streams are retried only before their first emitted text delta.
 - The current voice pipeline still waits for final interviewer text before batch TTS.
 
-No remote request is made unless its `VOICE_LLM_BACKEND` value and required credential variables are explicitly configured. See `docs/LLM_PROVIDERS.md` for the complete contract and setup.
+No remote request is made unless its `VOICE_LLM_BACKEND` value and required credential variables are explicitly configured. See `docs/INTERVIEW_ENGINE.md` and `docs/LLM_PROVIDERS.md` for the state, policy, and provider contracts.
 
 ### Text To Speech
 
@@ -110,6 +114,8 @@ AND any explicit "let me draw" hold has expired
 ```
 
 If speech restarts before the response begins, pending transcript fragments are retained and combined with the continuation. If the candidate starts speaking while the assistant is generating or playing audio, the response task is cancelled and an `assistant.interrupted` event tells the browser to stop playback.
+
+After `session.configure`, the interviewer schedules a short introduction and first requirements question. Finishing waits for queued STT, drains the last transcript without the normal quiet delay, and generates structured feedback.
 
 The current explicit drawing hold is a deterministic phrase matcher. A production version should use an intent classifier and release the hold when the promised canvas action completes rather than relying only on a timeout.
 
@@ -154,6 +160,7 @@ Avoid large lists of common words. Store the raw transcript separately from any 
 ## Concurrency Model
 
 - One WebSocket session owns its VAD recurrent state, segmenter, turn gate, and event sequence.
+- The same session owns its mutable interview phase, question thread, evidence ledger, and rubric coverage.
 - A per-session queue prevents audio reception from blocking during transcription.
 - The STT adapter and loaded model are shared across sessions.
 - The TTS adapter and loaded model are shared, with synthesis serialized by a lock.
@@ -168,6 +175,7 @@ Before multi-session deployment, benchmark CTranslate2 worker and CPU-thread set
 - The scaffold does not record audio.
 - Model weights and caches remain inside `.models` and `.cache` on `F:`.
 - `.env`, caches, model weights, and runtime data are Git-ignored.
+- Interview state remains in memory and is discarded when the WebSocket closes.
 - Databricks and Azure Foundry credentials never reach browser JavaScript.
 - The server does not automatically load `.env` files.
 
@@ -181,7 +189,8 @@ If transcript persistence is added, define consent, retention, encryption, delet
 | Kokoro files missing | Emits `response_failed` on first response | Surface guided download action before session start |
 | STT inference failure | Emits `transcription_failed` | Retry once, then offer text input |
 | Empty transcript | No interviewer response | Track silence/no-speech metric |
-| LLM/TTS failure | Emits `response_failed` | Provider fallback and text-only response |
+| Invalid plan or LLM failure | Emits `response_failed` before applying state | Provider fallback and retry |
+| TTS failure | Preserves accepted state and text, then emits `response_failed` | Continue in text-only mode |
 | Invalid JSON control event | Emits `invalid_json` | Add schema version negotiation |
 | Invalid diagram snapshot | Emits `invalid_diagram` and retains prior state | Report client/schema mismatch |
 | Browser disconnect | Cancels tasks and clears VAD state | Resume session from durable event log |
@@ -206,9 +215,9 @@ The VAD silence and canvas quiet periods overlap where possible. They should not
 ## Next Implementation Steps
 
 1. Stream Kokoro synthesis at clause boundaries behind the existing protocol.
-2. Add phase, rubric, evidence, and adaptive follow-up state to the interview engine.
+2. Add problem-specific rubric templates, time budgets, and configurable interview levels.
 3. Add an explicit system-design component palette that writes semantic roles into Excalidraw `customData`.
-4. Add speculative LLM generation after a high-confidence eager endpoint, with cancellation.
-5. Add replayable audio-plus-diagram session fixtures and latency traces.
+4. Persist opt-in replayable session events for recovery and offline evaluation.
+5. Add speculative LLM generation after a high-confidence eager endpoint, with cancellation.
 6. Add provider fallbacks and circuit breakers.
-7. Test on low-end Windows hardware and expected candidate accents.
+7. Test conversation quality on low-end Windows hardware and expected candidate accents.

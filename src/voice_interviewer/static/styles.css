@@ -24,6 +24,10 @@ main {
   padding: 28px 0 48px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 header,
 .panel-heading,
 .actions {
@@ -31,6 +35,10 @@ header,
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+.actions {
+  flex-wrap: wrap;
 }
 
 h1,
@@ -166,7 +174,89 @@ button:disabled {
 .transcript-panel {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 22px;
+}
+
+.interview-structure,
+.feedback-panel {
+  padding: 14px;
+  border: 1px solid #28374a;
+  border-radius: 12px;
+  background: #0d141e;
+}
+
+.structure-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.phase-chip {
+  max-width: 150px;
+  padding: 6px 9px;
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  border-radius: 999px;
+  color: #bfdbfe;
+  background: rgba(37, 99, 235, 0.13);
+  font-size: 0.68rem;
+  font-weight: 750;
+  text-align: center;
+}
+
+.current-question {
+  min-height: 48px;
+  margin-bottom: 14px;
+  color: #f0f5fb;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.state-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.state-metrics div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px;
+  border-radius: 8px;
+  color: #8da0b8;
+  background: #111b28;
+  font-size: 0.72rem;
+}
+
+.state-metrics strong {
+  color: #86efac;
+}
+
+.state-summary {
+  margin-bottom: 9px;
+  color: #9fb0c5;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.feedback-panel {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.feedback-panel h3 {
+  margin: 14px 0 6px;
+  color: #b7c6d8;
+  font-size: 0.76rem;
+}
+
+.feedback-panel ul {
+  margin: 0;
+  padding-left: 20px;
+  color: #d1dbe7;
+  font-size: 0.76rem;
+  line-height: 1.5;
 }
 
 .speech {

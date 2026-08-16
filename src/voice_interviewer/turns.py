@@ -63,6 +63,15 @@ class TurnGate:
         self.explicit_hold_until = 0.0
         return transcript
 
+    def force_consume(self) -> str | None:
+        if not self._transcript_parts:
+            return None
+        transcript = " ".join(self._transcript_parts)
+        self._transcript_parts.clear()
+        self.ready_at = None
+        self.explicit_hold_until = 0.0
+        return transcript
+
     def _recalculate(self) -> None:
         if self.candidate_speaking or not self._transcript_parts:
             self.ready_at = None

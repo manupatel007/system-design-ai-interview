@@ -134,6 +134,81 @@ Accepted as a legacy compatibility event. New clients should use `canvas.snapsho
 
 Signals that the microphone stopped or the client is about to disconnect. The server pads and evaluates the last partial VAD frame, then finalizes any active utterance.
 
+### `interview.finish`
+
+Requests evidence-backed completion. The browser stops and flushes the microphone first. The server waits for queued transcription, force-consumes any final transcript, cancels active playback, and runs the planner in `finalize` mode.
+
+```json
+{
+  "type": "interview.finish",
+  "payload": {}
+}
+```
+
+## Interview State Events
+
+`interview.state` is emitted after configuration and every accepted interviewer plan. Important fields include:
+
+```json
+{
+  "type": "interview.state",
+  "payload": {
+    "phase": "high_level_design",
+    "turnIndex": 3,
+    "currentQuestion": {
+      "id": "q-4",
+      "text": "What are the main components and request flow?",
+      "topic": "high-level architecture",
+      "expectedEvidence": ["architecture_and_data_flow"],
+      "askedTurn": 3,
+      "status": "unanswered"
+    },
+    "assumptions": ["Reads dominate writes"],
+    "decisions": [],
+    "coveredTopics": ["requirements", "capacity estimation"],
+    "rubric": [
+      {
+        "competency": "requirements_scope",
+        "label": "Requirements and scope",
+        "level": "demonstrated",
+        "rationale": "Candidate stated a latency target.",
+        "evidenceIds": ["ev-1-1"]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "ev-1-1",
+        "turn": 1,
+        "competency": "requirements_scope",
+        "summary": "Redirects require low latency.",
+        "source": "transcript",
+        "objectIds": []
+      }
+    ],
+    "evidenceCount": 1,
+    "phaseHistory": ["introduction", "requirements", "estimation", "high_level_design"],
+    "completed": false,
+    "feedback": null
+  }
+}
+```
+
+`interview.feedback` is emitted once the phase becomes `complete`:
+
+```json
+{
+  "type": "interview.feedback",
+  "payload": {
+    "summary": "Evidence-backed interview summary.",
+    "strengths": ["Requirements and scope"],
+    "improvements": ["Quantify capacity assumptions"],
+    "notDiscussed": ["Security, privacy, and observability"]
+  }
+}
+```
+
+Rubric levels are coverage markers (`not_observed`, `some_evidence`, or `demonstrated`), not numeric hiring scores. Diagram-only evidence may be listed for grounding but cannot upgrade them.
+
 ## Server Lifecycle Events
 
 | Event | Important payload | Meaning |
@@ -141,6 +216,8 @@ Signals that the microphone stopped or the client is about to disconnect. The se
 | `session.ready` | sample rate, encoding, active backends | Audio may be sent |
 | `session.configured` | none | Problem and glossary were accepted |
 | `canvas.synced` | revision, node/edge counts, selection | Structured diagram state was accepted |
+| `interview.state` | phase, question, evidence, rubric | Authoritative conversation state changed |
+| `interview.feedback` | summary, strengths, improvements, not discussed | Interview completed with evidence-backed feedback |
 | `candidate.speech.started` | none | VAD confirmed candidate speech |
 | `candidate.speech.ended` | `durationMs` | VAD finalized an utterance |
 | `candidate.transcript.final` | text, language, duration | Stable text available |
@@ -155,7 +232,8 @@ Signals that the microphone stopped or the client is about to disconnect. The se
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Listening
+    [*] --> Configured
+    Configured --> Listening: introduction completed
     Listening --> CandidateSpeaking: candidate.speech.started
     CandidateSpeaking --> Transcribing: candidate.speech.ended
     Transcribing --> WaitingForFloor: transcript.final
@@ -166,6 +244,8 @@ stateDiagram-v2
     AssistantGenerating --> CandidateSpeaking: candidate interrupts
     AssistantPlaying --> CandidateSpeaking: candidate interrupts
     AssistantPlaying --> Listening: response.completed
+    Listening --> Finalizing: interview.finish
+    Finalizing --> Complete: interview.feedback
 ```
 
 ## Barge-In Contract
@@ -178,7 +258,7 @@ When candidate speech is confirmed during an active assistant response:
 4. Candidate audio continues through VAD and STT.
 5. The next interviewer prompt should not assume unheard response content.
 
-The scaffold tracks whether the response was active, but it does not yet report exact text or audio duration played. Kokoro currently generates a full utterance before the audio event; the planned streaming adapter should add played-text reconciliation.
+The pipeline tracks whether the response was active, but it does not yet report exact text or audio duration played. Kokoro currently generates a full utterance before the audio event; the planned streaming adapter should add played-text reconciliation. `interview.finish` uses the same interruption event with reason `interview_finished`.
 
 ## Errors
 

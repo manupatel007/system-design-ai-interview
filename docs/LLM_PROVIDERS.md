@@ -23,7 +23,7 @@ Optional sampler fields such as `temperature` are omitted by default because som
 | `azure_foundry` | Model inference Chat Completions API | `api-key: ...` | Appends `/models/chat/completions` and the configured `api-version` |
 | `mock` | In-process deterministic adapter | None | No network |
 
-Both remote adapters implement the existing `InterviewLanguageModel` behavior through `GatewayInterviewLLM`. The lower-level `HttpLLMGateway` also exposes normalized completion and streaming methods for the structured interview engine.
+Both remote adapters expose a legacy text response and the structured `plan` operation through `GatewayInterviewLLM`. Provider objects are stateless and shared; each WebSocket owns its `StructuredInterviewEngine` and authoritative interview state.
 
 ## Databricks Configuration
 
@@ -62,7 +62,13 @@ Retries use bounded exponential backoff and honor numeric `Retry-After` values. 
 
 `LLMRequest.response_schema` maps to the Responses API `text.format` shape and the Chat Completions `response_format.json_schema` shape. Returned text is parsed as JSON before it is exposed as `LLMResponse.json_data`. Malformed structured output fails explicitly instead of silently falling back to unvalidated text.
 
-The conversation-engine checkpoint will use this capability for interview actions, state updates, rubric evidence, and final feedback.
+The conversation engine uses one strict `interview_turn_plan` schema for both providers. It requests candidate intent, current-question status, action, acknowledgement, spoken utterance, evidence and rubric updates, assumptions, decisions, covered topics, adjacent phase, next question, and final feedback. The parsed result is validated again locally before the reducer mutates state.
+
+Planner requests allow up to 1,200 output tokens and still omit `temperature`. When `VOICE_LLM_STREAMING=true`, structured JSON text deltas are buffered and validated before any state is applied or speech is synthesized.
+
+Obvious diagram-visibility and repeat-question repairs are deterministic and do not spend a provider request. See `docs/INTERVIEW_ENGINE.md` for the state and policy contract.
+
+With a remote backend, connecting schedules one introduction plan, each completed candidate turn normally schedules one plan, and **Finish interview** schedules one finalization plan. Those calls may be billable under the selected provider.
 
 ## Secret Safety
 
@@ -82,4 +88,4 @@ Never place credentials in `.env.example`, browser code, canvas payloads, prompt
 uv run pytest tests\test_llm_gateway.py
 ```
 
-The contract suite covers both payload formats, endpoint construction, authentication headers, final response parsing, SSE parsing, strict JSON Schema requests, retry behavior, provider selection, and secret-safe errors.
+The contract suite covers both payload formats, endpoint construction, authentication headers, final response parsing, SSE parsing, the shared interview-plan schema for Databricks and Azure, retry behavior, provider selection, and secret-safe errors.
