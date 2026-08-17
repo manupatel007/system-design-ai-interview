@@ -8,109 +8,129 @@
     <link rel="stylesheet" href="/static/excalidraw/diagram-app.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <div>
-          <p class="eyebrow">Local-first prototype</p>
-          <h1>System Design Voice Interviewer</h1>
+    <main class="meeting-shell">
+      <header class="meeting-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">SD</span>
+          <div>
+            <h1>System Design Interview</h1>
+            <p>Voice interview with a shared architecture canvas</p>
+          </div>
         </div>
-        <span id="status" class="status">Disconnected</span>
+
+        <div class="header-actions">
+          <details id="setup" class="setup-menu">
+            <summary>Interview setup</summary>
+            <div class="setup-popover panel">
+              <label>
+                Interview problem
+                <input id="problem" value="Design a URL shortener" />
+              </label>
+              <label>
+                Technical glossary
+                <input id="glossary" value="Kafka, Redis, PostgreSQL, gRPC, p99, QPS" />
+              </label>
+              <p>Settings are applied when you join the interview.</p>
+            </div>
+          </details>
+          <span id="status" class="status">Not connected</span>
+        </div>
       </header>
 
-      <section class="configuration panel">
-        <label>
-          Interview problem
-          <input id="problem" value="Design a URL shortener" />
-        </label>
-        <label>
-          Technical glossary
-          <input id="glossary" value="Kafka, Redis, PostgreSQL, gRPC, p99, QPS" />
-        </label>
-        <div class="actions">
-          <button id="connect">Connect</button>
-          <button id="microphone" disabled>Start microphone</button>
-          <button id="finish" class="secondary" disabled>Finish interview</button>
-          <button id="disconnect" class="secondary" disabled>Disconnect</button>
-        </div>
-      </section>
-
-      <section class="workspace">
-        <article class="panel canvas-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Structured architecture canvas</p>
-              <h2>Draw the system while you explain it</h2>
+      <section class="participant-grid" aria-label="Interview participants">
+        <article id="candidate-card" class="participant-card panel">
+          <div class="participant-avatar candidate-avatar" aria-hidden="true">Y</div>
+          <div class="participant-content">
+            <div class="participant-heading">
+              <div>
+                <p class="participant-role">Candidate</p>
+                <h2>You</h2>
+              </div>
+              <span id="candidate-state" class="participant-state">Not connected</span>
             </div>
-            <button id="clear" class="secondary">Clear</button>
-          </div>
-          <p class="canvas-help">Use shapes, bound text, arrows, and groups. The interviewer receives a compact semantic snapshot, not pixels.</p>
-          <div id="excalidraw-root" aria-label="System design diagram editor">
-            <p class="canvas-loading">Loading structured canvas...</p>
+            <p id="candidate" class="participant-caption">Join when you are ready to begin.</p>
           </div>
         </article>
 
-        <aside class="panel transcript-panel">
-          <div class="interview-structure">
-            <div class="structure-heading">
+        <article id="interviewer-card" class="participant-card panel">
+          <div class="participant-avatar interviewer-avatar" aria-hidden="true">AI</div>
+          <div class="participant-content">
+            <div class="participant-heading">
               <div>
-                <p class="eyebrow">Interview structure</p>
-                <h2>Live conversation state</h2>
+                <p class="participant-role">Interviewer</p>
+                <h2>AI interviewer</h2>
               </div>
               <span id="interview-phase" class="phase-chip">Not started</span>
             </div>
-            <p class="eyebrow">Current thread</p>
-            <p id="current-question" class="current-question">Connect to begin.</p>
-            <div class="state-metrics">
-              <div>
-                <span>Evidence</span>
-                <strong id="evidence-count">0</strong>
-              </div>
-              <div>
-                <span>Rubric</span>
-                <strong id="rubric-count">0 / 9</strong>
-              </div>
+            <p id="interviewer" class="participant-caption">Waiting for you to join.</p>
+            <div class="current-thread">
+              <span id="interviewer-state" class="participant-state">Idle</span>
+              <p id="current-question">The current question will appear here.</p>
             </div>
-            <p id="covered-topics" class="state-summary">No topics covered yet.</p>
-            <p id="rubric-summary" class="state-summary">No evidence recorded yet.</p>
-            <details>
-              <summary>Structured interview state</summary>
-              <pre id="interview-json" class="diagram-json">{}</pre>
-            </details>
+          </div>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <aside class="transcript-pane panel" aria-label="Conversation transcript">
+          <div class="pane-heading">
+            <div>
+              <p class="eyebrow">Conversation</p>
+              <h2>Transcript</h2>
+            </div>
+            <span class="live-indicator"><span aria-hidden="true"></span> Live</span>
           </div>
 
-          <div id="interview-feedback" class="feedback-panel" hidden>
-            <p class="eyebrow">Final feedback</p>
-            <p id="feedback-summary" class="speech"></p>
-            <h3>Strengths</h3>
-            <ul id="feedback-strengths"></ul>
-            <h3>Improvements</h3>
-            <ul id="feedback-improvements"></ul>
-            <p id="feedback-not-discussed" class="state-summary"></p>
-          </div>
+          <div id="transcript-scroll" class="transcript-scroll">
+            <div id="transcript-feed" class="transcript-feed" aria-live="polite">
+              <p id="transcript-empty" class="empty-state">
+                Candidate and interviewer turns will appear here.
+              </p>
+            </div>
 
-          <div>
-            <p class="eyebrow">Candidate</p>
-            <p id="candidate" class="speech">Waiting for speech...</p>
+            <section id="interview-feedback" class="feedback-panel" hidden>
+              <p class="eyebrow">Final feedback</p>
+              <p id="feedback-summary" class="feedback-summary"></p>
+              <h3>Strengths</h3>
+              <ul id="feedback-strengths"></ul>
+              <h3>Improvements</h3>
+              <ul id="feedback-improvements"></ul>
+              <p id="feedback-not-discussed" class="feedback-note"></p>
+            </section>
           </div>
-          <div>
-            <p class="eyebrow">Interviewer</p>
-            <p id="interviewer" class="speech">Waiting for a completed turn...</p>
-          </div>
-          <div>
-            <p class="eyebrow">Diagram model</p>
-            <p id="diagram-summary" class="diagram-summary">Waiting for canvas...</p>
-            <details>
-              <summary>Structured snapshot</summary>
-              <pre id="diagram-json" class="diagram-json">{}</pre>
-            </details>
-          </div>
-          <details>
-            <summary>Event log</summary>
-            <ol id="events"></ol>
-          </details>
         </aside>
+
+        <article class="canvas-panel panel">
+          <div class="pane-heading canvas-heading">
+            <div>
+              <p class="eyebrow">Shared workspace</p>
+              <h2>Architecture canvas</h2>
+            </div>
+            <div class="canvas-actions">
+              <span id="diagram-summary" class="diagram-summary">Canvas ready</span>
+              <button id="clear" class="quiet-button" type="button">Clear canvas</button>
+            </div>
+          </div>
+          <div id="excalidraw-root" aria-label="System design diagram editor">
+            <p class="canvas-loading">Loading architecture canvas...</p>
+          </div>
+        </article>
       </section>
     </main>
+
+    <nav class="meeting-controls panel" aria-label="Interview controls">
+      <button id="connect" class="control-button join-button" type="button">Join interview</button>
+      <button id="microphone" class="control-button" type="button" disabled aria-pressed="false">
+        Start microphone
+      </button>
+      <button id="finish" class="control-button finish-button" type="button" disabled>
+        Finish interview
+      </button>
+      <button id="disconnect" class="control-button leave-button" type="button" disabled>
+        Leave
+      </button>
+    </nav>
+
     <script type="module" src="/static/app.js"></script>
     <script type="module" src="/static/excalidraw/diagram-app.js"></script>
   </body>

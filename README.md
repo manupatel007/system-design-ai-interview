@@ -66,7 +66,7 @@ For local Silero VAD, `base.en` transcription, Kokoro speech, and the mock inter
 uv run voice-interviewer serve
 ```
 
-Open `http://127.0.0.1:8000` and connect. The interviewer opens the requirements phase automatically. Start the microphone, answer naturally, and draw on the Excalidraw canvas while speaking. The right panel shows the current phase, active question, covered topics, evidence and rubric coverage, exact diagram snapshot, and final feedback. Use **Finish interview** after your last explanation.
+Open `http://127.0.0.1:8000` and join. The interviewer opens the requirements phase automatically. The meeting-style workspace keeps candidate and interviewer cards at the top, a scrollable conversation transcript on the left, and the Excalidraw architecture canvas as the primary surface. Interview setup remains available from the compact header menu, and final feedback appears beneath the transcript. Use **Finish interview** after your last explanation.
 
 ## Rebuild the Canvas UI
 
@@ -145,4 +145,4 @@ Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databr
 - Kokoro currently synthesizes a full response before sending one PCM chunk; clause streaming remains future work.
 - Raw audio is held only for the active utterance and is not persisted.
 
-See `docs/VOICE_PIPELINE.md`, `docs/STRUCTURED_CANVAS.md`, `docs/INTERVIEW_ENGINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.
+See `docs/VOICE_PIPELINE.md`, `docs/TTS_LATENCY_FINDINGS.md`, `docs/STRUCTURED_CANVAS.md`, `docs/INTERVIEW_ENGINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.

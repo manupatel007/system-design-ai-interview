@@ -140,7 +140,7 @@ The browser's **Finish interview** action:
 5. Requests a `complete` plan with no next question.
 6. Emits `interview.feedback` and a final `interview.state`.
 
-The live UI displays phase, active question, evidence count, rubric coverage, covered topics, raw structured state, and final feedback.
+The meeting-style UI keeps the current phase and active question on the interviewer card, retains both speakers in a scrollable transcript, and shows final feedback in the transcript pane. Detailed evidence, rubric, and state projections remain available through the event protocol for tests, evaluation tooling, and future reviewer views rather than occupying the candidate workspace.
 
 ## Bounds and Safety
 

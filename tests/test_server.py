@@ -19,6 +19,11 @@ def test_health_and_static_client(mock_settings) -> None:
     assert "excalidraw-root" in index.text
     assert "interview-phase" in index.text
     assert "Finish interview" in index.text
+    assert 'participant-grid' in index.text
+    assert 'transcript-feed' in index.text
+    assert 'meeting-controls' in index.text
+    assert 'Structured interview state' not in index.text
+    assert 'Event log' not in index.text
     assert diagram_bundle.status_code == 200
 
 

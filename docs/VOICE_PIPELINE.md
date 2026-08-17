@@ -98,6 +98,8 @@ The model and voice pack are checksum-pinned by `scripts/download_models.py`. `K
 
 The current adapter generates a complete short interviewer utterance before emitting one audio event. Cancellation stops delivery immediately, while an already-running native inference finishes in its worker thread before that shared engine is reused. Future hardening should add clause streaming, pronunciation overrides for technical terms, and played-text reconciliation.
 
+On the current CPU-only development machine, warm Kokoro inference is the dominant speech-start bottleneck and runs at roughly 2.5 times generated audio duration. See `docs/TTS_LATENCY_FINDINGS.md` for the measured cold load, response-length scaling, stage breakdown, non-solutions, and ranked optimization plan.
+
 `ToneMockTTS` remains available under `--mock` for fast deterministic protocol tests.
 
 ## Turn Ownership

@@ -1,28 +1,30 @@
 const elements = {
   status: document.querySelector("#status"),
+  setup: document.querySelector("#setup"),
   connect: document.querySelector("#connect"),
   microphone: document.querySelector("#microphone"),
   finish: document.querySelector("#finish"),
   disconnect: document.querySelector("#disconnect"),
   problem: document.querySelector("#problem"),
   glossary: document.querySelector("#glossary"),
+  candidateCard: document.querySelector("#candidate-card"),
+  interviewerCard: document.querySelector("#interviewer-card"),
+  candidateState: document.querySelector("#candidate-state"),
+  interviewerState: document.querySelector("#interviewer-state"),
   candidate: document.querySelector("#candidate"),
   interviewer: document.querySelector("#interviewer"),
-  events: document.querySelector("#events"),
   interviewPhase: document.querySelector("#interview-phase"),
   currentQuestion: document.querySelector("#current-question"),
-  evidenceCount: document.querySelector("#evidence-count"),
-  rubricCount: document.querySelector("#rubric-count"),
-  coveredTopics: document.querySelector("#covered-topics"),
-  rubricSummary: document.querySelector("#rubric-summary"),
-  interviewJson: document.querySelector("#interview-json"),
+  transcriptScroll: document.querySelector("#transcript-scroll"),
+  transcriptFeed: document.querySelector("#transcript-feed"),
+  transcriptEmpty: document.querySelector("#transcript-empty"),
+  liveIndicator: document.querySelector(".live-indicator"),
   feedback: document.querySelector("#interview-feedback"),
   feedbackSummary: document.querySelector("#feedback-summary"),
   feedbackStrengths: document.querySelector("#feedback-strengths"),
   feedbackImprovements: document.querySelector("#feedback-improvements"),
   feedbackNotDiscussed: document.querySelector("#feedback-not-discussed"),
   diagramSummary: document.querySelector("#diagram-summary"),
-  diagramJson: document.querySelector("#diagram-json"),
   clear: document.querySelector("#clear"),
 };
 
@@ -39,13 +41,23 @@ let latestDiagramSnapshot = window.__diagramSnapshot ?? null;
 function setStatus(text, connected = false) {
   elements.status.textContent = text;
   elements.status.classList.toggle("connected", connected);
+  elements.liveIndicator.classList.toggle("active", connected);
 }
 
-function logEvent(event) {
-  const item = document.createElement("li");
-  item.textContent = `${event.sequence ?? "-"} ${event.type}`;
-  elements.events.prepend(item);
-  while (elements.events.children.length > 80) elements.events.lastChild.remove();
+function setParticipantState(element, text, tone = "") {
+  element.textContent = text;
+  if (tone) element.dataset.tone = tone;
+  else delete element.dataset.tone;
+}
+
+function setCardActive(element, active) {
+  element.classList.toggle("is-active", active);
+}
+
+function setSetupDisabled(disabled) {
+  elements.problem.disabled = disabled;
+  elements.glossary.disabled = disabled;
+  if (disabled) elements.setup.open = false;
 }
 
 function send(type, payload = {}) {
@@ -54,23 +66,71 @@ function send(type, payload = {}) {
   }
 }
 
+function resetTranscript() {
+  elements.transcriptFeed.querySelectorAll(".transcript-entry").forEach((entry) => entry.remove());
+  elements.transcriptEmpty.hidden = false;
+  elements.feedback.hidden = true;
+}
+
+function appendTranscript(speaker, text) {
+  const normalizedText = String(text ?? "").trim();
+  if (!normalizedText) return;
+
+  elements.transcriptEmpty.hidden = true;
+  const entry = document.createElement("article");
+  entry.className = `transcript-entry ${speaker}`;
+
+  const header = document.createElement("header");
+  const name = document.createElement("span");
+  name.className = "transcript-speaker";
+  name.textContent = speaker === "candidate" ? "You" : "AI interviewer";
+  const time = document.createElement("time");
+  time.className = "transcript-time";
+  time.dateTime = new Date().toISOString();
+  time.textContent = new Intl.DateTimeFormat([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date());
+  header.append(name, time);
+
+  const message = document.createElement("p");
+  message.textContent = normalizedText;
+  entry.append(header, message);
+  elements.transcriptFeed.append(entry);
+
+  const entries = elements.transcriptFeed.querySelectorAll(".transcript-entry");
+  if (entries.length > 100) entries[0].remove();
+  requestAnimationFrame(() => {
+    elements.transcriptScroll.scrollTop = elements.transcriptScroll.scrollHeight;
+  });
+}
+
 function connect() {
+  if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return;
+
   const scheme = location.protocol === "https:" ? "wss" : "ws";
   const sessionId = crypto.randomUUID();
   ensureAudioContext().resume().catch(() => {});
   socket = new WebSocket(`${scheme}://${location.host}/ws/interview/${sessionId}`);
   socket.binaryType = "arraybuffer";
+  elements.connect.disabled = true;
   setStatus("Connecting...");
+  setParticipantState(elements.interviewerState, "Joining", "busy");
+  setCardActive(elements.interviewerCard, true);
 
   socket.addEventListener("open", () => {
+    resetTranscript();
     setStatus("Connected", true);
-    elements.connect.disabled = true;
+    setSetupDisabled(true);
     elements.microphone.disabled = false;
     interviewCompleted = false;
     elements.finish.disabled = false;
     elements.finish.textContent = "Finish interview";
     elements.disconnect.disabled = false;
-    elements.feedback.hidden = true;
+    elements.candidate.textContent = "Microphone is off.";
+    elements.interviewer.textContent = "Preparing the first question...";
+    setParticipantState(elements.candidateState, "Mic off", "muted");
+    setParticipantState(elements.interviewerState, "Preparing", "busy");
     send("session.configure", {
       problem: elements.problem.value,
       glossary: elements.glossary.value.split(",").map((term) => term.trim()).filter(Boolean),
@@ -81,23 +141,59 @@ function connect() {
   socket.addEventListener("message", ({ data }) => {
     if (typeof data !== "string") return;
     const event = JSON.parse(data);
-    logEvent(event);
     const payload = event.payload ?? {};
-    if (event.type === "candidate.transcript.final") elements.candidate.textContent = payload.text;
-    if (event.type === "assistant.text.final") elements.interviewer.textContent = payload.text;
-    if (event.type === "assistant.audio.chunk") playPcm(payload.audio, payload.sampleRate);
-    if (event.type === "assistant.interrupted") stopPlayback();
+
+    if (event.type === "candidate.speech.started") {
+      setParticipantState(elements.candidateState, "Speaking", "active");
+      setCardActive(elements.candidateCard, true);
+    }
+    if (event.type === "candidate.speech.ended") {
+      setParticipantState(elements.candidateState, "Transcribing", "busy");
+    }
+    if (event.type === "candidate.transcript.final") {
+      elements.candidate.textContent = payload.text;
+      appendTranscript("candidate", payload.text);
+      setParticipantState(
+        elements.candidateState,
+        microphoneActive ? "Mic on" : "Mic off",
+        microphoneActive ? "active" : "muted",
+      );
+      setCardActive(elements.candidateCard, false);
+    }
+    if (event.type === "assistant.response.started") {
+      setParticipantState(elements.interviewerState, "Thinking", "busy");
+      setCardActive(elements.interviewerCard, true);
+    }
+    if (event.type === "assistant.text.final") {
+      elements.interviewer.textContent = payload.text;
+      appendTranscript("interviewer", payload.text);
+    }
+    if (event.type === "assistant.audio.chunk") {
+      setParticipantState(elements.interviewerState, "Speaking", "active");
+      playPcm(payload.audio, payload.sampleRate);
+    }
+    if (event.type === "assistant.response.completed") {
+      setParticipantState(elements.interviewerState, "Listening", "active");
+      setCardActive(elements.interviewerCard, false);
+    }
+    if (event.type === "assistant.interrupted") {
+      stopPlayback();
+      setParticipantState(elements.interviewerState, "Listening", "active");
+      setCardActive(elements.interviewerCard, false);
+    }
     if (event.type === "interview.state") renderInterviewState(payload);
     if (event.type === "interview.feedback") renderFeedback(payload);
     if (event.type === "error") {
       setStatus(`Error: ${payload.message ?? payload.code}`);
+      setParticipantState(elements.interviewerState, "Error", "muted");
+      setCardActive(elements.interviewerCard, false);
       if (socket?.readyState === WebSocket.OPEN && !interviewCompleted) {
         elements.finish.disabled = false;
       }
     }
   });
 
-  socket.addEventListener("close", () => resetConnection("Disconnected"));
+  socket.addEventListener("close", () => resetConnection("Not connected"));
   socket.addEventListener("error", () => setStatus("Connection error"));
 }
 
@@ -124,18 +220,26 @@ async function toggleMicrophone() {
   };
   source.connect(captureNode).connect(silentOutput).connect(audioContext.destination);
   microphoneActive = true;
-  elements.microphone.textContent = "Stop microphone";
+  elements.microphone.textContent = "Mute microphone";
+  elements.microphone.setAttribute("aria-pressed", "true");
+  elements.candidate.textContent = "Listening for your answer...";
+  setParticipantState(elements.candidateState, "Mic on", "active");
 }
 
-async function stopMicrophone() {
+async function stopMicrophone({ flush = true } = {}) {
   if (!microphoneActive) return;
-  send("audio.flush");
+  if (flush) send("audio.flush");
   captureNode?.disconnect();
   mediaStream?.getTracks().forEach((track) => track.stop());
   captureNode = undefined;
   mediaStream = undefined;
   microphoneActive = false;
   elements.microphone.textContent = "Start microphone";
+  elements.microphone.setAttribute("aria-pressed", "false");
+  if (socket?.readyState === WebSocket.OPEN) {
+    setParticipantState(elements.candidateState, "Mic off", "muted");
+  }
+  setCardActive(elements.candidateCard, false);
 }
 
 async function disconnect() {
@@ -151,16 +255,28 @@ async function finishInterview() {
   elements.microphone.disabled = true;
   elements.finish.disabled = true;
   elements.finish.textContent = "Preparing feedback...";
+  setParticipantState(elements.interviewerState, "Preparing feedback", "busy");
+  setCardActive(elements.interviewerCard, true);
   send("interview.finish");
 }
 
 function resetConnection(status) {
+  void stopMicrophone({ flush: false });
   setStatus(status);
+  setSetupDisabled(false);
   elements.connect.disabled = false;
   elements.microphone.disabled = true;
   elements.finish.disabled = true;
   elements.finish.textContent = "Finish interview";
   elements.disconnect.disabled = true;
+  elements.candidate.textContent = "Join when you are ready to begin.";
+  elements.interviewer.textContent = "Waiting for you to join.";
+  elements.interviewPhase.textContent = "Not started";
+  elements.currentQuestion.textContent = "The current question will appear here.";
+  setParticipantState(elements.candidateState, "Not connected");
+  setParticipantState(elements.interviewerState, "Idle");
+  setCardActive(elements.candidateCard, false);
+  setCardActive(elements.interviewerCard, false);
   stopPlayback();
 }
 
@@ -197,33 +313,23 @@ function stopPlayback() {
 }
 
 function renderDiagram(snapshot) {
-  const delta = snapshot.delta?.summary ? ` - ${snapshot.delta.summary}` : "";
+  const delta = snapshot.delta?.summary ? ` · ${snapshot.delta.summary}` : "";
   elements.diagramSummary.textContent =
-    `${snapshot.nodes.length} components | ${snapshot.edges.length} relationships${delta}`;
-  elements.diagramJson.textContent = JSON.stringify(snapshot, null, 2);
+    `${snapshot.nodes.length} components · ${snapshot.edges.length} relationships${delta}`;
 }
 
 function renderInterviewState(state) {
-  const rubric = state.rubric ?? [];
-  const demonstrated = rubric.filter((item) => item.level === "demonstrated").length;
-  const someEvidence = rubric.filter((item) => item.level === "some_evidence").length;
   interviewCompleted = Boolean(state.completed);
   elements.interviewPhase.textContent = humanize(state.phase ?? "not_started");
   elements.currentQuestion.textContent =
     state.currentQuestion?.text ?? (state.completed ? "Interview complete." : "Listening...");
-  elements.evidenceCount.textContent = String(state.evidenceCount ?? 0);
-  elements.rubricCount.textContent = `${demonstrated + someEvidence} / ${rubric.length || 9}`;
-  elements.coveredTopics.textContent = state.coveredTopics?.length
-    ? `Covered: ${state.coveredTopics.map(humanize).join(", ")}`
-    : "No topics covered yet.";
-  elements.rubricSummary.textContent =
-    `${demonstrated} demonstrated | ${someEvidence} with some evidence`;
-  elements.interviewJson.textContent = JSON.stringify(state, null, 2);
   if (state.feedback) renderFeedback(state.feedback);
   if (state.completed) {
     elements.finish.disabled = true;
     elements.finish.textContent = "Interview complete";
     elements.microphone.disabled = true;
+    setParticipantState(elements.interviewerState, "Complete", "active");
+    setCardActive(elements.interviewerCard, false);
   }
 }
 
@@ -239,6 +345,9 @@ function renderFeedback(feedback) {
   elements.feedbackNotDiscussed.textContent = feedback.notDiscussed?.length
     ? `Not discussed: ${feedback.notDiscussed.join(", ")}`
     : "All rubric areas received some evidence.";
+  requestAnimationFrame(() => {
+    elements.transcriptScroll.scrollTop = elements.transcriptScroll.scrollHeight;
+  });
 }
 
 function renderList(element, items = [], emptyText) {
