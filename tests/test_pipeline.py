@@ -49,6 +49,36 @@ async def test_pipeline_runs_complete_mock_turn(mock_settings) -> None:
     assert [event["sequence"] for event in events] == list(range(1, len(events) + 1))
 
 
+@pytest.mark.asyncio
+async def test_pipeline_rejects_empty_low_confidence_transcript(mock_settings) -> None:
+    events = []
+
+    async def capture(event):
+        events.append(event)
+
+    pipeline = InterviewSessionPipeline(
+        session_id="rejected-transcript-session",
+        settings=mock_settings,
+        stt=MockSTT(""),
+        llm=MockInterviewLLM(),
+        tts=ToneMockTTS(),
+        vad=EnergyVad(),
+        send_event=capture,
+    )
+    await pipeline.start()
+    speech = np.full(512 * 3, 0.1, dtype=np.float32)
+    silence = np.zeros(512 * 3, dtype=np.float32)
+
+    await pipeline.handle_audio(float32_to_pcm16(np.concatenate((speech, silence))))
+    await asyncio.wait_for(pipeline._transcription_queue.join(), timeout=1)
+    await pipeline.close()
+
+    event_types = [event["type"] for event in events]
+    assert "candidate.transcript.rejected" in event_types
+    assert "candidate.transcript.final" not in event_types
+    assert "assistant.response.started" not in event_types
+
+
 class LongPlaybackTTS:
     async def synthesize(self, text: str) -> AudioOutput:
         return AudioOutput(pcm_s16le=bytes(16_000 * 2 * 10), sample_rate=16_000)

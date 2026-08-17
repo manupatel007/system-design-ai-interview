@@ -127,6 +127,7 @@ Copy `.env.example` values into your process environment as needed. The server d
 | `VOICE_TTS_VOICE` | `af_heart` | Voice key from the Kokoro v1.0 voice pack |
 | `VOICE_TTS_LANGUAGE` | `en-us` | Phonemizer language, normally `en-us` or `en-gb` |
 | `VOICE_TTS_SPEED` | `1.0` | Speech speed from `0.5` to `2.0` |
+| `VOICE_VAD_MIN_SPEECH_MS` | `192` | Sustained speech required before opening an utterance |
 | `VOICE_VAD_MIN_SILENCE_MS` | `1200` | Patient speech endpointing for interviews |
 | `VOICE_CANVAS_QUIET_MS` | `1500` | Canvas inactivity required before a response |
 

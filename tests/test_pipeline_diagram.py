@@ -38,7 +38,8 @@ async def test_pipeline_accepts_structured_diagram_snapshot(mock_settings) -> No
     }
     assert pipeline._client.diagram_snapshot is not None
     assert pipeline._client.recent_diagram_delta == "Connected API to database"
-    assert "PostgreSQL" in (pipeline._stt_prompt() or "")
+    assert "PostgreSQL" in (pipeline._stt_hotwords() or "")
+    assert "System design interview" not in (pipeline._stt_hotwords() or "")
     await pipeline.close()
 
 

@@ -220,6 +220,7 @@ Rubric levels are coverage markers (`not_observed`, `some_evidence`, or `demonst
 | `interview.feedback` | summary, strengths, improvements, not discussed | Interview completed with evidence-backed feedback |
 | `candidate.speech.started` | none | VAD confirmed candidate speech |
 | `candidate.speech.ended` | `durationMs` | VAD finalized an utterance |
+| `candidate.transcript.rejected` | reason, `durationMs` | No reliable speech decode was accepted; candidate may retry |
 | `candidate.transcript.final` | text, language, duration | Stable text available |
 | `assistant.response.started` | none | Turn gate yielded the floor |
 | `assistant.text.final` | `text` | Interviewer response text |
@@ -236,6 +237,7 @@ stateDiagram-v2
     Configured --> Listening: introduction completed
     Listening --> CandidateSpeaking: candidate.speech.started
     CandidateSpeaking --> Transcribing: candidate.speech.ended
+    Transcribing --> Listening: transcript.rejected
     Transcribing --> WaitingForFloor: transcript.final
     WaitingForFloor --> CandidateSpeaking: speech resumes
     WaitingForFloor --> WaitingForFloor: semantic canvas.snapshot

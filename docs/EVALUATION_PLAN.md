@@ -38,7 +38,7 @@ consistent hashing, write-ahead log, change data capture
 at-least-once, exactly-once, eventual consistency
 ```
 
-Generate problem-specific glossary variants and test both with and without Whisper initial prompting.
+Generate problem-specific glossary variants and test both with and without faster-whisper hotwords. Include short fragments, silence, playback echo, low input levels, and prompt-echo regression cases.
 
 ## Metrics
 

@@ -93,7 +93,7 @@ class Settings:
             vad_backend=os.getenv("VOICE_VAD_BACKEND", "silero"),
             vad_threshold=_floating("VOICE_VAD_THRESHOLD", 0.5),
             vad_negative_threshold=_floating("VOICE_VAD_NEGATIVE_THRESHOLD", 0.35),
-            vad_min_speech_ms=_integer("VOICE_VAD_MIN_SPEECH_MS", 96),
+            vad_min_speech_ms=_integer("VOICE_VAD_MIN_SPEECH_MS", 192),
             vad_min_silence_ms=_integer("VOICE_VAD_MIN_SILENCE_MS", 1_200),
             vad_prefix_padding_ms=_integer("VOICE_VAD_PREFIX_PADDING_MS", 256),
             canvas_quiet_ms=_integer("VOICE_CANVAS_QUIET_MS", 1_500),

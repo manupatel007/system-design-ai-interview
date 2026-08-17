@@ -150,6 +150,15 @@ function connect() {
     if (event.type === "candidate.speech.ended") {
       setParticipantState(elements.candidateState, "Transcribing", "busy");
     }
+    if (event.type === "candidate.transcript.rejected") {
+      elements.candidate.textContent = "I could not transcribe that clearly. Please try again.";
+      setParticipantState(
+        elements.candidateState,
+        microphoneActive ? "Try again" : "Mic off",
+        microphoneActive ? "busy" : "muted",
+      );
+      setCardActive(elements.candidateCard, false);
+    }
     if (event.type === "candidate.transcript.final") {
       elements.candidate.textContent = payload.text;
       appendTranscript("candidate", payload.text);

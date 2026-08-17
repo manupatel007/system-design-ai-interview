@@ -216,7 +216,15 @@ class InterviewSessionPipeline:
                 self._transcription_queue.task_done()
                 return
             try:
-                transcript = await self.stt.transcribe(audio, prompt=self._stt_prompt())
+                transcript = await self.stt.transcribe(audio, prompt=self._stt_hotwords())
+                if not transcript.text:
+                    await self._emit(
+                        "candidate.transcript.rejected",
+                        reason="no_reliable_speech",
+                        durationMs=round(transcript.duration_seconds * 1000),
+                    )
+                    self._schedule_response()
+                    continue
                 await self._emit(
                     "candidate.transcript.final",
                     text=transcript.text,
@@ -320,7 +328,7 @@ class InterviewSessionPipeline:
             diagram=self._client.diagram_snapshot,
         )
 
-    def _stt_prompt(self) -> str | None:
+    def _stt_hotwords(self) -> str | None:
         diagram_terms = (
             list(self._client.diagram_snapshot.glossary_terms())
             if self._client.diagram_snapshot
@@ -329,7 +337,7 @@ class InterviewSessionPipeline:
         terms = list(dict.fromkeys(self._client.glossary + diagram_terms))
         if not terms:
             return None
-        return "System design interview. Expected technical terms: " + ", ".join(terms[:50])
+        return ", ".join(terms[:50])
 
     async def _emit(self, event_type: str, **payload: object) -> None:
         if self._closed:

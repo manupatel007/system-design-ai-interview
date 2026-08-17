@@ -60,7 +60,7 @@ Partial Whisper decodes are intentionally absent from the decision loop. Re-deco
 - Frame duration: 32 ms
 - Speech threshold: 0.5
 - Negative threshold: 0.35
-- Minimum speech: 96 ms
+- Minimum speech: 192 ms
 - Minimum silence: 1,200 ms
 - Prefix padding: 256 ms
 
@@ -142,7 +142,9 @@ Production hardening should add:
 
 ## Technical Vocabulary
 
-The client supplies a glossary during session configuration. Diagram labels and inferred roles, with selected components first, are combined with that glossary into a bounded Whisper initial prompt. Opaque Excalidraw IDs are never used as vocabulary.
+The client supplies a glossary during session configuration. Diagram labels and inferred roles, with selected components first, are combined with that glossary into bounded faster-whisper `hotwords`. Opaque Excalidraw IDs are never used as vocabulary.
+
+An earlier implementation used the natural-language initial prompt `System design interview. Expected technical terms: ...` for every utterance. A 350 ms speech fragment reproduced a prompt echo as the transcript `System design interview.` The adapter now uses the dedicated hotwords option, rejects segments over the standard compression-ratio limit, rejects low-log-probability or high-no-speech decodes, and drops incomplete connector words from sub-800 ms fragments. If no segment survives, the browser receives `candidate.transcript.rejected` and invites the candidate to retry instead of advancing the interview.
 
 Good glossary entries are unusual, high-value terms:
 
@@ -190,7 +192,7 @@ If transcript persistence is added, define consent, retention, encryption, delet
 | Silero model missing | WebSocket closes with `session_start_failed` | Surface guided download action |
 | Kokoro files missing | Emits `response_failed` on first response | Surface guided download action before session start |
 | STT inference failure | Emits `transcription_failed` | Retry once, then offer text input |
-| Empty transcript | No interviewer response | Track silence/no-speech metric |
+| Empty or unreliable transcript | Emits `candidate.transcript.rejected`; no interviewer response | Track rejection reason and input-level telemetry |
 | Invalid plan or LLM failure | Emits `response_failed` before applying state | Provider fallback and retry |
 | TTS failure | Preserves accepted state and text, then emits `response_failed` | Continue in text-only mode |
 | Invalid JSON control event | Emits `invalid_json` | Add schema version negotiation |

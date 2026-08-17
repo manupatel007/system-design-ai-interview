@@ -22,5 +22,10 @@ async def test_downloaded_base_en_transcribes_sample(project_root) -> None:
     audio = decode_audio(str(sample), sampling_rate=16_000)
 
     result = await transcriber.transcribe(audio)
+    short_fragment = await transcriber.transcribe(
+        audio[: round(0.35 * 16_000)],
+        prompt="Kafka, Redis, PostgreSQL",
+    )
 
     assert "fellow americans" in result.text.lower()
+    assert short_fragment.text == ""

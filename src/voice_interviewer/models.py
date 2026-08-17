@@ -15,6 +15,8 @@ class TranscriptSegment:
     end_seconds: float
     text: str
     average_log_probability: float | None = None
+    no_speech_probability: float | None = None
+    compression_ratio: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -100,7 +100,7 @@ Keep this section to approximately 90 seconds in the recording.
 
 - Consumes mono 16 kHz audio in 512-sample frames.
 - Preserves recurrent state plus 64 samples of context between frames.
-- Uses a `0.5` speech threshold, `0.35` negative threshold, 96 ms minimum speech, 256 ms prefix
+- Uses a `0.5` speech threshold, `0.35` negative threshold, 192 ms minimum speech, 256 ms prefix
   padding, and 1,200 ms of silence to close an utterance.
 - Solves speech endpointing only. It does not decide that the candidate has yielded the interview
   turn.

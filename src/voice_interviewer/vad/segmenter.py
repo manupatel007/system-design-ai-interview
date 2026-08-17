@@ -27,7 +27,7 @@ class SpeechSegmenter:
         frame_samples: int = 512,
         threshold: float = 0.5,
         negative_threshold: float = 0.35,
-        min_speech_ms: int = 96,
+        min_speech_ms: int = 192,
         min_silence_ms: int = 1_200,
         prefix_padding_ms: int = 256,
         trailing_padding_ms: int = 160,
