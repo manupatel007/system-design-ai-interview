@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -36,7 +37,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         llm=create_llm(active_settings),
         tts=create_tts(active_settings),
     )
-    app = FastAPI(title="Voice Interviewer", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        load_tts = getattr(services.tts, "load", None)
+        if load_tts is not None and getattr(services.tts, "ready", False):
+            await load_tts()
+        yield
+
+    app = FastAPI(title="Voice Interviewer", version="0.1.0", lifespan=lifespan)
     app.state.services = services
     app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
 
@@ -57,9 +66,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "models": {
                 "stt": active_settings.stt_model,
                 "sileroReady": active_settings.silero_model_path.is_file(),
-                "ttsVoice": active_settings.tts_voice,
+                "ttsModel": active_settings.tts_model,
+                "ttsReady": active_settings.tts_ready,
+                "ttsVoice": (
+                    active_settings.tts_voice
+                    if active_settings.tts_backend == "kokoro"
+                    else None
+                ),
                 "kokoroReady": active_settings.kokoro_model_path.is_file()
                 and active_settings.kokoro_voices_path.is_file(),
+                "piperReady": active_settings.piper_model_path.is_file()
+                and active_settings.piper_config_path.is_file(),
             },
         }
 

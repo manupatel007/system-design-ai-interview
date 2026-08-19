@@ -11,6 +11,7 @@ dependencies = [
     "kokoro-onnx>=0.5,<0.6",
     "numpy>=2.1,<3",
     "onnxruntime>=1.22,<2",
+    "piper-tts>=1.7,<2",
     "uvicorn[standard]>=0.35,<1",
 ]
 

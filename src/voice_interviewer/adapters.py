@@ -5,7 +5,7 @@ from voice_interviewer.errors import ConfigurationError
 from voice_interviewer.llm import AzureFoundryLLM, DatabricksLLM, MockInterviewLLM
 from voice_interviewer.models import InterviewLanguageModel, SpeechToText, TextToSpeech
 from voice_interviewer.stt import FasterWhisperSTT, MockSTT
-from voice_interviewer.tts import KokoroTTS, ToneMockTTS
+from voice_interviewer.tts import KokoroTTS, PiperTTS, ToneMockTTS
 
 
 def create_stt(settings: Settings) -> SpeechToText:
@@ -56,6 +56,12 @@ def create_tts(settings: Settings) -> TextToSpeech:
             voices_path=settings.kokoro_voices_path,
             voice=settings.tts_voice,
             language=settings.tts_language,
+            speed=settings.tts_speed,
+        )
+    if settings.tts_backend == "piper":
+        return PiperTTS(
+            model_path=settings.piper_model_path,
+            config_path=settings.piper_config_path,
             speed=settings.tts_speed,
         )
     raise ConfigurationError(f"Unsupported TTS backend: {settings.tts_backend}")

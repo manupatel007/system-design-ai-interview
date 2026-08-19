@@ -6,7 +6,7 @@
 - Client audio: binary WebSocket messages containing mono PCM signed 16-bit little-endian samples at 16 kHz.
 - Client controls: JSON text messages.
 - Server events: JSON text messages.
-- Server audio: base64 PCM in `assistant.audio.chunk`; each event declares its sample rate. Kokoro currently emits mono 24 kHz output.
+- Server audio: base64 PCM in `assistant.audio.chunk`; each event declares its sample rate. Piper emits mono 22.05 kHz sentence chunks, while the optional Kokoro backend emits mono 24 kHz output.
 
 Production deployments may move assistant audio to a dedicated WebRTC track while retaining the JSON data channel for control events.
 
@@ -224,7 +224,7 @@ Rubric levels are coverage markers (`not_observed`, `some_evidence`, or `demonst
 | `candidate.transcript.final` | text, language, duration | Stable text available |
 | `assistant.response.started` | none | Turn gate yielded the floor |
 | `assistant.text.final` | `text` | Interviewer response text |
-| `assistant.audio.chunk` | audio, encoding, sample rate, channels | Playable PCM audio |
+| `assistant.audio.chunk` | audio, encoding, sample rate, channels, `chunkIndex` | Sequential playable PCM audio |
 | `assistant.response.completed` | none | All response output was emitted |
 | `assistant.interrupted` | `reason` | Stop queued assistant playback |
 | `error` | code, message | Recoverable or terminal failure |
@@ -260,7 +260,7 @@ When candidate speech is confirmed during an active assistant response:
 4. Candidate audio continues through VAD and STT.
 5. The next interviewer prompt should not assume unheard response content.
 
-The pipeline tracks whether the response was active, but it does not yet report exact text or audio duration played. Kokoro currently generates a full utterance before the audio event; the planned streaming adapter should add played-text reconciliation. `interview.finish` uses the same interruption event with reason `interview_finished`.
+The pipeline tracks whether the response was active, but it does not yet report exact text or audio duration played. Piper emits sentence chunks as they become available, and the browser schedules them sequentially by arrival order. Played-text reconciliation remains future work. The optional Kokoro backend still generates a full utterance before its audio event. `interview.finish` uses the same interruption event with reason `interview_finished`.
 
 ## Errors
 

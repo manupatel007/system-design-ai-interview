@@ -32,7 +32,7 @@ flowchart LR
     STT --> GATE[Canvas-aware turn gate]
     WS --> GATE
     GATE --> LLM[Mock, Databricks, or Azure Foundry LLM]
-    LLM --> TTS[Kokoro-82M INT8 or mock TTS]
+    LLM --> TTS[Piper, Kokoro, or mock TTS]
     TTS -->|PCM16 audio event| WS
     WS --> PLAYBACK[Browser playback]
 ```
@@ -87,20 +87,20 @@ No remote request is made unless its `VOICE_LLM_BACKEND` value and required cred
 
 ### Text To Speech
 
-- Model: Kokoro-82M v1.0 INT8 ONNX
-- Runtime: `kokoro-onnx` with ONNX Runtime CPU execution
-- Default voice: `af_heart`, configurable without changing model weights
-- Output: mono signed PCM16 at 24 kHz
-- Model footprint: approximately 88 MiB plus a 27 MiB voice pack
-- Licenses: MIT adapter/runtime package and Apache-2.0 model
+- Default model: Piper `en_US-lessac-medium` ONNX
+- Runtime: `piper-tts 1.7` with ONNX Runtime CPU execution
+- Output: mono signed PCM16 at 22.05 kHz
+- Delivery: one audio chunk per sentence
+- Model footprint: approximately 60.3 MiB
+- Alternate backend: Kokoro-82M v1.0 INT8 with `af_heart` at 24 kHz
 
-The model and voice pack are checksum-pinned by `scripts/download_models.py`. `KokoroTTS` loads them lazily, retains one engine for the process, and serializes synthesis because the phonemizer and ONNX session are shared. Text, voice, language, and speed stay local.
+The Piper model and configuration are revision- and checksum-pinned by `scripts/download_models.py`. `PiperTTS` retains one engine for the process, serializes synthesis, and maps the common speed control to Piper length scale. When artifacts are ready, the server loads the engine during application startup rather than delaying the first interview turn.
 
-The current adapter generates a complete short interviewer utterance before emitting one audio event. Cancellation stops delivery immediately, while an already-running native inference finishes in its worker thread before that shared engine is reused. Future hardening should add clause streaming, pronunciation overrides for technical terms, and played-text reconciliation.
+Piper's synchronous sentence iterator is advanced in worker threads. Each completed sentence is emitted immediately as `assistant.audio.chunk`; the browser schedules chunks against one Web Audio cursor so they do not overlap. Response completion accounts for playback already elapsed while later sentences were synthesized. Barge-in cancels delivery and clears both active and future browser sources.
 
-On the current CPU-only development machine, warm Kokoro inference is the dominant speech-start bottleneck and runs at roughly 2.5 times generated audio duration. See `docs/TTS_LATENCY_FINDINGS.md` for the measured cold load, response-length scaling, stage breakdown, non-solutions, and ranked optimization plan.
+`piper-tts 1.7` is GPL-3.0-or-later. The pinned [Lessac model card](https://huggingface.co/rhasspy/piper-voices/blob/f5a6e9094787fd865d65cb024472f977f9c542b5/en/en_US/lessac/medium/MODEL_CARD) points to a [research-only dataset license](https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html) that expressly excludes commercial speech products. This research repository accepts that constraint; commercial use requires a separately approved runtime and voice.
 
-`ToneMockTTS` remains available under `--mock` for fast deterministic protocol tests.
+Kokoro remains selectable with `VOICE_TTS_BACKEND=kokoro`. It retains its full-response adapter and measured CPU latency limitations. `ToneMockTTS` remains available under `--mock` for deterministic protocol tests. See `docs/TTS_LATENCY_FINDINGS.md` for the backend benchmarks.
 
 ## Turn Ownership
 
@@ -190,7 +190,8 @@ If transcript persistence is added, define consent, retention, encryption, delet
 | Failure | Current behavior | Production follow-up |
 | --- | --- | --- |
 | Silero model missing | WebSocket closes with `session_start_failed` | Surface guided download action |
-| Kokoro files missing | Emits `response_failed` on first response | Surface guided download action before session start |
+| Piper files missing | Emits `response_failed` on first response | Run `scripts/download_models.py --piper` |
+| Kokoro files missing | Emits `response_failed` when the alternate backend is selected | Run `scripts/download_models.py --kokoro` |
 | STT inference failure | Emits `transcription_failed` | Retry once, then offer text input |
 | Empty or unreliable transcript | Emits `candidate.transcript.rejected`; no interviewer response | Track rejection reason and input-level telemetry |
 | Invalid plan or LLM failure | Emits `response_failed` before applying state | Provider fallback and retry |
@@ -210,15 +211,15 @@ Initial targets for the target development machine:
 | `base.en` final decode | under 600 ms p95 for a typical utterance |
 | Canvas gate after final edit | 1,500 ms |
 | Live LLM first token | under 800 ms p95 |
-| TTS first audio | under 250 ms p95 |
-| Warm Kokoro synthesis | under 1.0 real-time factor |
+| Piper first sentence audio | under 300 ms p95 |
+| Warm Piper synthesis | under 0.15 real-time factor |
 | End of candidate turn to first audio | under 2 seconds p95 |
 
-The VAD silence and canvas quiet periods overlap where possible. They should not be blindly summed in product latency calculations. The first-audio targets require the planned clause-streaming TTS path; the current full-response adapter is a functional baseline.
+The VAD silence and canvas quiet periods overlap where possible. They should not be blindly summed in product latency calculations. Piper sentence streaming now supplies the low-latency TTS path; the end-to-end target still includes LLM planning and network scheduling.
 
 ## Next Implementation Steps
 
-1. Stream Kokoro synthesis at clause boundaries behind the existing protocol.
+1. Add technical-term pronunciation overrides and played-text reconciliation for Piper chunks.
 2. Add problem-specific rubric templates, time budgets, and configurable interview levels.
 3. Add an explicit system-design component palette that writes semantic roles into Excalidraw `customData`.
 4. Persist opt-in replayable session events for recovery and offline evaluation.

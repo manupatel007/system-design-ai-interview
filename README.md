@@ -12,11 +12,13 @@ Browser microphone (16 kHz PCM)
   -> canvas-aware turn gate
   -> stateful interview engine and evidence policy
   -> mock, Databricks, or Azure Foundry structured planner
-  -> Kokoro-82M INT8 local TTS
+  -> Piper en_US-lessac-medium local TTS
   -> browser audio playback
 ```
 
-The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Kokoro-82M v1.0 INT8 artifacts. `--mock` remains available for dependency-free protocol tests. No API credentials are required unless a remote LLM provider is selected.
+The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Piper `en_US-lessac-medium` artifacts. Piper emits sentence chunks that the browser queues for continuous playback. Kokoro remains available as an alternate backend, and `--mock` remains available for dependency-free protocol tests. No API credentials are required unless a remote LLM provider is selected.
+
+> **Research-only voice:** [`piper-tts 1.7`](https://pypi.org/project/piper-tts/) is GPL-3.0-or-later. The pinned [Lessac model card](https://huggingface.co/rhasspy/piper-voices/blob/f5a6e9094787fd865d65cb024472f977f9c542b5/en/en_US/lessac/medium/MODEL_CARD) links to a [dataset license](https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html) limited to research use that excludes commercial speech products. This repository intentionally uses it only for research. Select a separately approved runtime and voice before commercial deployment or redistribution.
 
 ## Requirements
 
@@ -40,9 +42,10 @@ This command:
 2. Installs dependencies with uv using `.cache\uv`.
 3. Downloads Silero VAD to `.models\silero-vad`.
 4. Downloads faster-whisper `base.en` to `.models\faster-whisper-base.en`.
-5. Downloads Kokoro INT8 and its voice pack to `.models\kokoro`.
-6. Downloads a small pinned speech sample to `.cache\test-assets`.
-7. Prints a sanitized readiness report.
+5. Downloads the pinned Piper Lessac voice to `.models\piper`.
+6. Downloads Kokoro INT8 and its voice pack as an alternate backend.
+7. Downloads a small pinned speech sample to `.cache\test-assets`.
+8. Prints a sanitized readiness report.
 
 To install dependencies without model weights:
 
@@ -59,7 +62,7 @@ For an immediate end-to-end mock demonstration:
 uv run voice-interviewer serve --mock
 ```
 
-For local Silero VAD, `base.en` transcription, Kokoro speech, and the mock interviewer LLM:
+For local Silero VAD, `base.en` transcription, Piper speech, and the mock interviewer LLM:
 
 ```powershell
 . .\scripts\env.ps1
@@ -94,7 +97,7 @@ The smoke test runs the local `base.en` adapter against the pinned JFK WAV sampl
 uv run python scripts/smoke_tts.py
 ```
 
-This creates `.runtime\kokoro-smoke.wav` with real local speech. The first run includes ONNX and phonemizer warm-up; later responses reuse the loaded engine.
+This creates `.runtime\tts-smoke.wav` with the configured real local TTS backend. A ready Piper model is loaded during server startup and reused across sessions.
 
 With the normal server running, exercise one complete real voice turn with:
 
@@ -123,10 +126,12 @@ Copy `.env.example` values into your process environment as needed. The server d
 | `VOICE_LLM_TIMEOUT_SECONDS` | `30` | Remote provider request timeout |
 | `VOICE_LLM_MAX_RETRIES` | `2` | Bounded transient-failure retries |
 | `VOICE_LLM_STREAMING` | `false` | Consume provider SSE through the common gateway |
-| `VOICE_TTS_BACKEND` | `kokoro` | `kokoro` or `mock` |
-| `VOICE_TTS_VOICE` | `af_heart` | Voice key from the Kokoro v1.0 voice pack |
-| `VOICE_TTS_LANGUAGE` | `en-us` | Phonemizer language, normally `en-us` or `en-gb` |
-| `VOICE_TTS_SPEED` | `1.0` | Speech speed from `0.5` to `2.0` |
+| `VOICE_TTS_BACKEND` | `piper` | `piper`, `kokoro`, or `mock` |
+| `VOICE_PIPER_MODEL_PATH` | `.models/piper/en_US-lessac-medium.onnx` | Piper ONNX voice path inside the workspace |
+| `VOICE_PIPER_CONFIG_PATH` | `.models/piper/en_US-lessac-medium.onnx.json` | Matching Piper voice configuration |
+| `VOICE_TTS_VOICE` | `af_heart` | Kokoro-only voice key |
+| `VOICE_TTS_LANGUAGE` | `en-us` | Kokoro-only phonemizer language |
+| `VOICE_TTS_SPEED` | `1.0` | Backend-neutral speech speed from `0.5` to `2.0` |
 | `VOICE_VAD_MIN_SPEECH_MS` | `192` | Sustained speech required before opening an utterance |
 | `VOICE_VAD_MIN_SILENCE_MS` | `1200` | Patient speech endpointing for interviews |
 | `VOICE_CANVAS_QUIET_MS` | `1500` | Canvas inactivity required before a response |
@@ -143,7 +148,8 @@ Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databr
 - Live rubric levels represent evidence coverage, not a final hiring score; diagram shapes alone cannot upgrade them.
 - Interview state is in memory only and is discarded when the WebSocket session closes.
 - Provider plans require strict structured-output support; malformed plans fail without mutating state.
-- Kokoro currently synthesizes a full response before sending one PCM chunk; clause streaming remains future work.
+- Piper emits one PCM chunk per sentence; the browser schedules chunks sequentially and barge-in clears queued playback.
+- Kokoro remains a full-response compatibility backend and does not provide low-latency sentence streaming.
 - Raw audio is held only for the active utterance and is not persisted.
 
 See `docs/VOICE_PIPELINE.md`, `docs/TTS_LATENCY_FINDINGS.md`, `docs/STRUCTURED_CANVAS.md`, `docs/INTERVIEW_ENGINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.

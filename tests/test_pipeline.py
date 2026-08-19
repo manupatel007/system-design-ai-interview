@@ -84,6 +84,46 @@ class LongPlaybackTTS:
         return AudioOutput(pcm_s16le=bytes(16_000 * 2 * 10), sample_rate=16_000)
 
 
+class ChunkedTTS:
+    async def synthesize(self, text: str) -> AudioOutput:
+        raise AssertionError("Pipeline should prefer sentence streaming")
+
+    async def synthesize_stream(self, text: str):
+        yield AudioOutput(pcm_s16le=bytes(160), sample_rate=16_000)
+        yield AudioOutput(pcm_s16le=bytes(320), sample_rate=16_000)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_emits_streamed_tts_chunks_in_order(mock_settings) -> None:
+    events = []
+    completed = asyncio.Event()
+
+    async def capture(event):
+        events.append(event)
+        if event["type"] == "assistant.response.completed":
+            completed.set()
+
+    pipeline = InterviewSessionPipeline(
+        session_id="streamed-tts-session",
+        settings=mock_settings,
+        stt=MockSTT("I would add a cache."),
+        llm=MockInterviewLLM(),
+        tts=ChunkedTTS(),
+        vad=EnergyVad(),
+        send_event=capture,
+    )
+    await pipeline.start()
+    speech = np.full(512 * 3, 0.1, dtype=np.float32)
+    silence = np.zeros(512 * 3, dtype=np.float32)
+
+    await pipeline.handle_audio(float32_to_pcm16(np.concatenate((speech, silence))))
+    await asyncio.wait_for(completed.wait(), timeout=3)
+    await pipeline.close()
+
+    chunks = [event for event in events if event["type"] == "assistant.audio.chunk"]
+    assert [chunk["payload"]["chunkIndex"] for chunk in chunks] == [0, 1]
+
+
 @pytest.mark.asyncio
 async def test_candidate_speech_interrupts_playback_window(mock_settings) -> None:
     events = []

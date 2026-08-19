@@ -30,6 +30,7 @@ async def run(base_url: str, audio_path: Path) -> None:
     response_text = ""
     output_bytes = 0
     output_sample_rate = 0
+    output_chunks = 0
     async with connect(f"{base_url.rstrip('/')}/ws/interview/{session_id}", proxy=None) as socket:
         ready = json.loads(await socket.recv())
         if ready.get("type") != "session.ready":
@@ -38,10 +39,11 @@ async def run(base_url: str, audio_path: Path) -> None:
         expected_backends = {
             "sttBackend": "faster-whisper",
             "vadBackend": "silero",
-            "ttsBackend": "kokoro",
         }
         if any(ready_payload.get(key) != value for key, value in expected_backends.items()):
             raise RuntimeError(f"Real local backends are not active: {ready_payload}")
+        if ready_payload.get("ttsBackend") not in {"piper", "kokoro"}:
+            raise RuntimeError(f"Real local TTS is not active: {ready_payload}")
         await socket.send(
             json.dumps(
                 {
@@ -76,19 +78,25 @@ async def run(base_url: str, audio_path: Path) -> None:
                 elif event_type == "assistant.text.final":
                     response_text = str(payload.get("text", ""))
                 elif event_type == "assistant.audio.chunk":
-                    output_bytes = len(base64.b64decode(str(payload.get("audio", ""))))
-                    output_sample_rate = int(payload.get("sampleRate", 0))
+                    chunk_bytes = len(base64.b64decode(str(payload.get("audio", ""))))
+                    chunk_sample_rate = int(payload.get("sampleRate", 0))
+                    if output_sample_rate and chunk_sample_rate != output_sample_rate:
+                        raise RuntimeError("TTS chunks use inconsistent sample rates")
+                    output_bytes += chunk_bytes
+                    output_chunks += 1
+                    output_sample_rate = chunk_sample_rate
                 elif event_type == "assistant.response.completed":
                     break
 
-    if not transcript or not response_text or output_bytes <= 1_000 or output_sample_rate != 24_000:
-        raise RuntimeError("Voice turn did not produce real STT and Kokoro speech")
+    if not transcript or not response_text or output_bytes <= 1_000 or output_sample_rate <= 0:
+        raise RuntimeError("Voice turn did not produce real STT and TTS speech")
     print(
         json.dumps(
             {
                 "transcript": transcript,
                 "response": response_text,
                 "audioBytes": output_bytes,
+                "audioChunks": output_chunks,
                 "audioSampleRate": output_sample_rate,
                 "events": event_types,
             },

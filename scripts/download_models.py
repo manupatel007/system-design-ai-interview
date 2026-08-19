@@ -31,6 +31,19 @@ KOKORO_VOICES_URL = (
     "model-files-v1.0/voices-v1.0.bin"
 )
 KOKORO_VOICES_SHA256 = "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"
+PIPER_VOICES_REVISION = "f5a6e9094787fd865d65cb024472f977f9c542b5"
+PIPER_MODEL_URL = (
+    "https://huggingface.co/rhasspy/piper-voices/resolve/"
+    f"{PIPER_VOICES_REVISION}/en/en_US/lessac/medium/"
+    "en_US-lessac-medium.onnx?download=true"
+)
+PIPER_MODEL_SHA256 = "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f"
+PIPER_CONFIG_URL = (
+    "https://huggingface.co/rhasspy/piper-voices/resolve/"
+    f"{PIPER_VOICES_REVISION}/en/en_US/lessac/medium/"
+    "en_US-lessac-medium.onnx.json?download=true"
+)
+PIPER_CONFIG_SHA256 = "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0"
 
 
 def _sha256(path: Path) -> str:
@@ -100,6 +113,19 @@ def download_kokoro() -> None:
     )
 
 
+def download_piper() -> None:
+    _download(
+        PIPER_MODEL_URL,
+        MODEL_ROOT / "piper" / "en_US-lessac-medium.onnx",
+        PIPER_MODEL_SHA256,
+    )
+    _download(
+        PIPER_CONFIG_URL,
+        MODEL_ROOT / "piper" / "en_US-lessac-medium.onnx.json",
+        PIPER_CONFIG_SHA256,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download local voice models to F drive")
     parser.add_argument("--all", action="store_true")
@@ -107,8 +133,11 @@ def main() -> None:
     parser.add_argument("--whisper", action="store_true")
     parser.add_argument("--sample", action="store_true")
     parser.add_argument("--kokoro", action="store_true")
+    parser.add_argument("--piper", action="store_true")
     args = parser.parse_args()
-    selected = args.all or not (args.silero or args.whisper or args.sample or args.kokoro)
+    selected = args.all or not (
+        args.silero or args.whisper or args.sample or args.kokoro or args.piper
+    )
     os.environ.setdefault("HF_HOME", str(CACHE_ROOT / "huggingface"))
     os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(CACHE_ROOT / "huggingface" / "hub"))
     os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
@@ -116,6 +145,8 @@ def main() -> None:
         download_silero()
     if selected or args.whisper:
         download_whisper()
+    if selected or args.piper:
+        download_piper()
     if selected or args.kokoro:
         download_kokoro()
     if selected or args.sample:

@@ -4,7 +4,7 @@ import asyncio
 import base64
 import contextlib
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 import numpy as np
 
@@ -14,6 +14,7 @@ from voice_interviewer.diagram import DiagramSnapshot, DiagramValidationError
 from voice_interviewer.events import ClientState, EventFactory
 from voice_interviewer.interview.engine import InterviewEngineResult, StructuredInterviewEngine
 from voice_interviewer.models import (
+    AudioOutput,
     InterviewContext,
     InterviewLanguageModel,
     SpeechToText,
@@ -296,18 +297,28 @@ class InterviewSessionPipeline:
             if result.feedback:
                 await self._emit("interview.feedback", **result.feedback.to_dict())
             await self._emit("assistant.text.final", text=result.text)
-            audio = await self.tts.synthesize(result.text)
-            await self._emit(
-                "assistant.audio.chunk",
-                audio=base64.b64encode(audio.pcm_s16le).decode("ascii"),
-                encoding="pcm_s16le",
-                sampleRate=audio.sample_rate,
-                channels=audio.channels,
-            )
-            playback_seconds = len(audio.pcm_s16le) / (
-                2 * audio.channels * audio.sample_rate
-            )
-            await asyncio.sleep(playback_seconds)
+            playback_ends_at: float | None = None
+            chunk_count = 0
+            async for audio in self._synthesize_chunks(result.text):
+                await self._emit(
+                    "assistant.audio.chunk",
+                    audio=base64.b64encode(audio.pcm_s16le).decode("ascii"),
+                    encoding="pcm_s16le",
+                    sampleRate=audio.sample_rate,
+                    channels=audio.channels,
+                    chunkIndex=chunk_count,
+                )
+                chunk_count += 1
+                chunk_seconds = len(audio.pcm_s16le) / (
+                    2 * audio.channels * audio.sample_rate
+                )
+                emitted_at = time.perf_counter()
+                playback_ends_at = (
+                    max(emitted_at, playback_ends_at or emitted_at) + chunk_seconds
+                )
+            if playback_ends_at is None:
+                raise RuntimeError("TTS returned no audio chunks")
+            await asyncio.sleep(max(0.0, playback_ends_at - time.perf_counter()))
             await self._emit("assistant.response.completed")
             self._assistant_active = False
         except asyncio.CancelledError:
@@ -316,6 +327,14 @@ class InterviewSessionPipeline:
         except Exception as error:
             self._assistant_active = False
             await self._emit("error", code="response_failed", message=str(error))
+
+    async def _synthesize_chunks(self, text: str) -> AsyncIterator[AudioOutput]:
+        synthesize_stream = getattr(self.tts, "synthesize_stream", None)
+        if synthesize_stream is None:
+            yield await self.tts.synthesize(text)
+            return
+        async for chunk in synthesize_stream(text):
+            yield chunk
 
     def _interview_context(self, transcript: str = "") -> InterviewContext:
         return InterviewContext(

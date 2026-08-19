@@ -36,6 +36,7 @@ let captureWorkletLoaded = false;
 let microphoneActive = false;
 let interviewCompleted = false;
 const playbackSources = new Set();
+let playbackCursor = 0;
 let latestDiagramSnapshot = window.__diagramSnapshot ?? null;
 
 function setStatus(text, connected = false) {
@@ -193,6 +194,7 @@ function connect() {
     if (event.type === "interview.state") renderInterviewState(payload);
     if (event.type === "interview.feedback") renderFeedback(payload);
     if (event.type === "error") {
+      stopPlayback();
       setStatus(`Error: ${payload.message ?? payload.code}`);
       setParticipantState(elements.interviewerState, "Error", "muted");
       setCardActive(elements.interviewerCard, false);
@@ -311,7 +313,9 @@ function playPcm(encodedAudio, sampleRate) {
   source.connect(context.destination);
   playbackSources.add(source);
   source.addEventListener("ended", () => playbackSources.delete(source));
-  source.start();
+  const startAt = Math.max(context.currentTime + 0.01, playbackCursor);
+  source.start(startAt);
+  playbackCursor = startAt + buffer.duration;
 }
 
 function stopPlayback() {
@@ -319,6 +323,7 @@ function stopPlayback() {
     try { source.stop(); } catch (_) { /* already stopped */ }
   });
   playbackSources.clear();
+  playbackCursor = 0;
 }
 
 function renderDiagram(snapshot) {

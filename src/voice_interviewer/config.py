@@ -63,6 +63,8 @@ class Settings:
     tts_backend: str
     kokoro_model_path: Path
     kokoro_voices_path: Path
+    piper_model_path: Path
+    piper_config_path: Path
     tts_voice: str
     tts_language: str
     tts_speed: float
@@ -102,12 +104,20 @@ class Settings:
             llm_timeout_seconds=_floating("VOICE_LLM_TIMEOUT_SECONDS", 30.0),
             llm_max_retries=_integer("VOICE_LLM_MAX_RETRIES", 2),
             llm_streaming=_boolean("VOICE_LLM_STREAMING", False),
-            tts_backend=os.getenv("VOICE_TTS_BACKEND", "kokoro"),
+            tts_backend=os.getenv("VOICE_TTS_BACKEND", "piper"),
             kokoro_model_path=_project_path(
                 "VOICE_TTS_MODEL_PATH", ".models/kokoro/kokoro-v1.0.int8.onnx"
             ),
             kokoro_voices_path=_project_path(
                 "VOICE_TTS_VOICES_PATH", ".models/kokoro/voices-v1.0.bin"
+            ),
+            piper_model_path=_project_path(
+                "VOICE_PIPER_MODEL_PATH",
+                ".models/piper/en_US-lessac-medium.onnx",
+            ),
+            piper_config_path=_project_path(
+                "VOICE_PIPER_CONFIG_PATH",
+                ".models/piper/en_US-lessac-medium.onnx.json",
             ),
             tts_voice=os.getenv("VOICE_TTS_VOICE", "af_heart"),
             tts_language=os.getenv("VOICE_TTS_LANGUAGE", "en-us"),
@@ -124,6 +134,24 @@ class Settings:
                 "AZURE_FOUNDRY_API_VERSION", "2024-05-01-preview"
             ),
         )
+
+    @property
+    def tts_ready(self) -> bool:
+        if self.tts_backend == "mock":
+            return True
+        if self.tts_backend == "piper":
+            return self.piper_model_path.is_file() and self.piper_config_path.is_file()
+        if self.tts_backend == "kokoro":
+            return self.kokoro_model_path.is_file() and self.kokoro_voices_path.is_file()
+        return False
+
+    @property
+    def tts_model(self) -> str:
+        if self.tts_backend == "piper":
+            return self.piper_model_path.stem
+        if self.tts_backend == "kokoro":
+            return self.kokoro_model_path.stem
+        return self.tts_backend
 
     def prepare_directories(self) -> None:
         self.model_root.mkdir(parents=True, exist_ok=True)

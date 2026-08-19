@@ -36,6 +36,10 @@ def mock_settings() -> Settings:
         tts_backend="mock",
         kokoro_model_path=PROJECT_ROOT / ".models" / "kokoro" / "kokoro-v1.0.int8.onnx",
         kokoro_voices_path=PROJECT_ROOT / ".models" / "kokoro" / "voices-v1.0.bin",
+        piper_model_path=PROJECT_ROOT / ".models" / "piper" / "en_US-lessac-medium.onnx",
+        piper_config_path=(
+            PROJECT_ROOT / ".models" / "piper" / "en_US-lessac-medium.onnx.json"
+        ),
         tts_voice="af_heart",
         tts_language="en-us",
         tts_speed=1.0,

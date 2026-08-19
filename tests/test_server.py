@@ -14,6 +14,8 @@ def test_health_and_static_client(mock_settings) -> None:
     assert health.status_code == 200
     assert health.json()["backends"]["stt"] == "mock"
     assert health.json()["backends"]["tts"] == "mock"
+    assert health.json()["models"]["ttsReady"] is True
+    assert health.json()["models"]["ttsModel"] == "mock"
     assert index.status_code == 200
     assert "System Design Voice Interviewer" in index.text
     assert "excalidraw-root" in index.text

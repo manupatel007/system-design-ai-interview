@@ -39,7 +39,7 @@ State this configuration explicitly near the beginning:
 - **Speech detection:** Silero VAD ONNX, local CPU.
 - **Speech to text:** `faster-whisper base.en`, local CPU INT8.
 - **Interview planner:** Databricks Responses endpoint for the main take.
-- **Text to speech:** Kokoro-82M v1.0 INT8, local CPU.
+- **Text to speech:** Piper `en_US-lessac-medium`, local CPU, sentence streamed.
 - **Canvas:** Excalidraw in the browser with a semantic scene reducer.
 - **Session state:** In-memory, per WebSocket session, reducer-controlled.
 - **Fallback take:** The same real local voice and canvas stack with only the LLM planner changed
@@ -60,32 +60,31 @@ MB, in the recording.
 | --- | --- | ---: | --- |
 | Silero VAD | ONNX, CPU | 2.22 MiB | 512 samples per frame, 32 ms at 16 kHz |
 | `base.en` | CTranslate2/faster-whisper | 140.93 MiB | `model.bin` is 138.49 MiB; runtime compute is INT8 |
-| Kokoro-82M | INT8 ONNX | 88.08 MiB | Shared acoustic model |
-| Kokoro voices | `voices-v1.0.bin` | 26.91 MiB | Separate voice embeddings; default `af_heart` |
-| **Local model total** | VAD + STT + TTS | **258.14 MiB** | Does not include Python packages or browser memory |
+| Piper Lessac | Medium ONNX | 60.27 MiB | Research-only default voice, 22.05 kHz |
+| **Local model total** | VAD + STT + TTS | **203.42 MiB** | Does not include Python packages or browser memory |
 | Excalidraw bundle | Browser production assets | 7.55 MiB | UI code, not a model |
 | Databricks planner | Remote serving endpoint | 0 local model MiB | Provider-side model memory is not locally observable |
 
 ### Runtime Memory Sample
 
 Artifact size is not RAM usage. A one-process Windows `GetProcessMemoryInfo` probe on the current
-development machine produced the following working-set snapshots after real VAD inference and a
-real STT decode.
-Kokoro was loaded into ONNX Runtime; the final row was captured before its first phonemizer and
-synthesis call.
+development machine produced the following working-set snapshots after real VAD, STT, and Piper
+inference in one process.
 
 | Stage in one Python process | Working set | Increment from prior stage |
 | --- | ---: | ---: |
-| Python + NumPy baseline | 33.04 MiB | - |
-| After Silero inference | 70.39 MiB | 37.35 MiB |
-| After one `base.en` transcription | 237.27 MiB | 166.88 MiB |
-| After Kokoro model and voices load | 375.56 MiB | 138.29 MiB |
+| Python and model imports | 78.02 MiB | - |
+| After Silero inference | 94.77 MiB | 16.75 MiB |
+| After one `base.en` transcription | 244.50 MiB | 149.73 MiB |
+| After Piper model load | 319.88 MiB | 75.38 MiB |
+| After first Piper synthesis | 373.56 MiB | 53.68 MiB |
 
 Use this wording:
 
-> The local artifacts are about 258 MiB on disk. On this machine, the cumulative warm Python
-> working set reached about 376 MiB before the browser and before Kokoro's first synthesis. That
-> is a sample, not a deployment guarantee. Native runtimes can reserve substantially more memory,
+> The default local artifacts are about 203 MiB on disk. On this machine, the cumulative warm
+> Python working set reached about 374 MiB after the first Piper synthesis and before the browser.
+> That is a sample, not a deployment guarantee. Native runtimes can reserve substantially more
+> memory,
 > so the current setup guidance conservatively asks for roughly 2 GB of free RAM and production
 > sizing needs workload-specific profiling.
 
@@ -115,14 +114,15 @@ Keep this section to approximately 90 seconds in the recording.
 - Receives a bounded vocabulary prompt containing terms such as `Redis`, `PostgreSQL`, `base62`,
   `QPS`, and selected diagram labels.
 
-### Kokoro-82M
+### Piper Lessac
 
-- Quantized ONNX model with a separate voice pack.
-- Default voice `af_heart`, `en-us`, speed `1.0`.
-- Produces mono signed PCM16 at 24 kHz for browser playback.
-- Loads lazily and is retained in the server process.
-- Current limitation: a complete interviewer utterance is synthesized before one audio chunk is
-  sent; clause streaming is not implemented yet.
+- Medium-quality ONNX voice loaded through `piper-tts 1.7`.
+- Produces mono signed PCM16 at 22.05 kHz.
+- Preloads during server startup when its pinned files are ready.
+- Emits one sentence chunk at a time; the browser queues chunks without overlap.
+- Uses the common speed setting by mapping it to Piper length scale.
+- Research-only here: the runtime is GPL-3.0-or-later and the Lessac model card links to a
+  research-only dataset license that excludes commercial speech products.
 
 ### Databricks Planner
 
@@ -153,8 +153,8 @@ flowchart LR
     GATE --> STATE[Per-session interview state]
     STATE --> PLAN[Mock / Databricks / Azure planner]
     PLAN --> REDUCER[Typed plan + deterministic reducer]
-    REDUCER --> TTS[Kokoro TTS]
-    TTS -->|PCM16 24 kHz| PLAY[Browser playback]
+    REDUCER --> TTS[Piper TTS]
+    TTS -->|PCM16 22.05 kHz sentence chunks| PLAY[Queued browser playback]
     REDUCER --> UI[Phase, question, evidence, rubric, feedback]
 ```
 
@@ -307,7 +307,7 @@ rubric[9]
 - Status becomes `Connected`.
 - Phase becomes `Requirements`.
 - A requirements question becomes the active thread.
-- Local Kokoro plays the same accepted interviewer text shown in the UI.
+- Local Piper plays the same accepted interviewer text shown in the UI.
 
 **Do not narrate over the introduction.** Capture system audio and microphone on separate tracks.
 
@@ -590,7 +590,7 @@ uv run --env-file .env voice-interviewer serve
 ```
 
 The `doctor` output is sanitized and reports only readiness booleans. Confirm that Silero and
-Kokoro are ready and Databricks is configured. Do not print environment variables or use a shell
+Piper is ready and Databricks is configured. Do not print environment variables or use a shell
 command that echoes the token.
 
 ### 3. Warm the Same Server Process
@@ -609,7 +609,7 @@ interview state.
 
 ### 4. Configure the Browser and Audio
 
-- Use a headset to prevent Kokoro playback from re-entering the microphone.
+- Use a headset to prevent Piper playback from re-entering the microphone.
 - Capture application/system audio and microphone on separate recording tracks.
 - Grant microphone permission before the final take.
 - Use a browser zoom level that keeps both participant cards, the transcript pane, and canvas visible together.
@@ -625,14 +625,14 @@ interview state.
 - Do not fill inference latency with nervous speech; that can be interpreted as a continuation or
   barge-in.
 - Expect the first cold turn to be slower if the server was not warmed.
-- The current TTS path waits for a complete response before audio delivery; do not claim token-to-
-  audio streaming.
+- Piper streams only after complete accepted text and one completed sentence of audio; do not call
+  it token-to-audio or native speech-to-speech streaming.
 
 ## Fallback Takes
 
 ### Remote Planner Failure
 
-Keep real Silero, `base.en`, Kokoro, and the canvas, but swap only the planner:
+Keep real Silero, `base.en`, Piper, and the canvas, but swap only the planner:
 
 ```powershell
 . .\scripts\env.ps1
@@ -669,7 +669,7 @@ Do not record the final take until all of these pass twice:
 
 - [ ] No secret, token, `.env` content, or authorization header appears on screen.
 - [ ] Sanitized `doctor` output shows the intended backend readiness.
-- [ ] Introduction text and Kokoro audio both arrive.
+- [ ] Introduction text and Piper audio chunks both arrive.
 - [ ] The bad first answer stays in the requirements thread.
 - [ ] The diagram produces at least seven nodes and six bound relationships.
 - [ ] Drawing alone leaves the rubric unchanged.

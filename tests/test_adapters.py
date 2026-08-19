@@ -12,6 +12,7 @@ from voice_interviewer.llm.mock import MockInterviewLLM
 from voice_interviewer.models import InterviewContext
 from voice_interviewer.tts.kokoro import KokoroTTS
 from voice_interviewer.tts.mock import ToneMockTTS
+from voice_interviewer.tts.piper import PiperTTS
 
 
 @pytest.mark.asyncio
@@ -38,6 +39,15 @@ def test_create_tts_uses_kokoro_settings(mock_settings) -> None:
     assert tts.voice == "af_heart"
     assert tts.language == "en-us"
     assert tts.speed == 1.15
+
+
+def test_create_tts_uses_piper_settings(mock_settings) -> None:
+    tts = create_tts(replace(mock_settings, tts_backend="piper", tts_speed=1.2))
+
+    assert isinstance(tts, PiperTTS)
+    assert tts.model_path == mock_settings.piper_model_path
+    assert tts.config_path == mock_settings.piper_config_path
+    assert tts.speed == 1.2
 
 
 def test_databricks_requires_configuration() -> None:
