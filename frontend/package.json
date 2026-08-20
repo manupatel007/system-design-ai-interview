@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node src/diagram.test.js"
+    "test": "node src/all.test.js"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "0.18.1",

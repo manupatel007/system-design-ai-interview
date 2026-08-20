@@ -1,7 +1,9 @@
 const CONNECTOR_TYPES = new Set(["arrow", "line"]);
 
 export function normalizeScene(elements, appState = {}) {
-  const visible = elements.filter((element) => !element.isDeleted);
+  const visible = elements.filter(
+    (element) => !element.isDeleted && element.customData?.aiPreview !== true,
+  );
   const boundText = new Map();
   for (const element of visible) {
     if (element.type === "text" && element.containerId) {

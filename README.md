@@ -71,6 +71,17 @@ uv run voice-interviewer serve
 
 Open `http://127.0.0.1:8000` and join. The interviewer opens the requirements phase automatically. The meeting-style workspace keeps candidate and interviewer cards at the top, a scrollable conversation transcript on the left, and the Excalidraw architecture canvas as the primary surface. Interview setup remains available from the compact header menu, and final feedback appears beneath the transcript. Use **Finish interview** after your last explanation.
 
+### Try the AI Canvas Preview
+
+The canvas currently includes a browser-only simulated tutor interaction so the visual language can be evaluated before connecting it to the LLM:
+
+1. Draw a component and select it.
+2. Choose **Preview suggestion** from the purple **AI tutor** panel.
+3. Inspect the dashed purple highlight, proposed component, connector, and tutor note.
+4. Choose **Accept**, **Reject**, or **Undo AI**.
+
+Preview objects are deliberately excluded from semantic canvas snapshots, LLM context, canvas turn triggers, and rubric evidence. The control makes no model or network call and is not yet the production tutor-mode protocol.
+
 ## Rebuild the Canvas UI
 
 Runtime users do not need Node or internet access because the production bundle is checked in. After changing `frontend/`, rebuild and test it with:
