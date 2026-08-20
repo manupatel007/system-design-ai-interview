@@ -9,7 +9,7 @@ import { createRoot } from "react-dom/client";
 
 import {
   acceptAiProposal,
-  buildAiTutorProposal,
+  buildStructuredAiProposal,
   removeAiProposal,
 } from "./ai-preview.js";
 import {
@@ -150,44 +150,79 @@ function DiagramEditor() {
     };
   }, [clearCanvasFeedback, showCanvasFeedback]);
 
-  const previewSuggestion = useCallback(() => {
-    const instance = api.current;
-    if (!instance) return;
-    const currentElements = activeProposal
-      ? removeAiProposal(instance.getSceneElements(), activeProposal.proposalId)
-      : [...instance.getSceneElements()];
-    const appState = instance.getAppState();
-    const zoom = appState.zoom?.value ?? 1;
-    const viewport = {
-      centerX: appState.width / (2 * zoom) - appState.scrollX,
-      centerY: appState.height / (2 * zoom) - appState.scrollY,
-    };
-    const proposalId = globalThis.crypto?.randomUUID?.() ?? `preview-${Date.now()}`;
-    const proposal = buildAiTutorProposal(
-      currentElements,
-      appState.selectedElementIds,
-      viewport,
-      proposalId,
-    );
-    const converted = convertToExcalidrawElements(proposal.skeletons, {
-      regenerateIds: false,
-    }).map((element) => ({
-      ...element,
-      locked: true,
-      customData: {
-        ...element.customData,
-        author: "ai",
-        aiPreview: true,
-        aiProposalId: proposalId,
-        aiPreviewStatus: "proposed",
-      },
-    }));
-    instance.updateScene({
-      elements: [...currentElements, ...converted],
-      captureUpdate: CaptureUpdateAction.NEVER,
-    });
-    setActiveProposal(proposal);
-  }, [activeProposal]);
+  const showModelProposal = useCallback(
+    (detail = {}) => {
+      const instance = api.current;
+      if (!instance) return;
+      const currentElements = activeProposal
+        ? removeAiProposal(
+            instance.getSceneElements(),
+            activeProposal.proposalId,
+          )
+        : [...instance.getSceneElements()];
+      const appState = instance.getAppState();
+      const zoom = appState.zoom?.value ?? 1;
+      const viewport = {
+        centerX: appState.width / (2 * zoom) - appState.scrollX,
+        centerY: appState.height / (2 * zoom) - appState.scrollY,
+      };
+      const proposalId = String(
+        detail.proposalId ??
+          globalThis.crypto?.randomUUID?.() ??
+          "proposal-" + Date.now(),
+      );
+      const proposal = buildStructuredAiProposal(
+        currentElements,
+        detail.proposal,
+        detail.anchorObjectIds,
+        viewport,
+        proposalId,
+      );
+      if (!proposal.skeletons.length) return;
+      const converted = convertToExcalidrawElements(proposal.skeletons, {
+        regenerateIds: false,
+      }).map((element) => ({
+        ...element,
+        locked: true,
+        customData: {
+          ...element.customData,
+          author: "ai",
+          aiPreview: true,
+          aiProposalId: proposalId,
+          aiPreviewStatus: "proposed",
+        },
+      }));
+      instance.updateScene({
+        elements: [...currentElements, ...converted],
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      setActiveProposal(proposal);
+      window.requestAnimationFrame(() => {
+        const proposalElements = instance
+          .getSceneElements()
+          .filter(
+            (element) => element.customData?.aiProposalId === proposalId,
+          );
+        if (!proposalElements.length) return;
+        instance.scrollToContent(proposalElements, {
+          fitToViewport: true,
+          viewportZoomFactor:
+            proposal.kind === "reference_architecture" ? 0.72 : 0.55,
+          minZoom: 0.2,
+          maxZoom: 1.15,
+          animate: true,
+          duration: 550,
+        });
+      });
+    },
+    [activeProposal],
+  );
+
+  useEffect(() => {
+    const show = ({ detail }) => showModelProposal(detail);
+    window.addEventListener("diagram.proposal.show", show);
+    return () => window.removeEventListener("diagram.proposal.show", show);
+  }, [showModelProposal]);
 
   const acceptSuggestion = useCallback(() => {
     const instance = api.current;
@@ -243,7 +278,6 @@ function DiagramEditor() {
           compact={isMobile}
           proposal={activeProposal}
           acceptedCount={acceptedProposalIds.length}
-          onPreview={previewSuggestion}
           onAccept={acceptSuggestion}
           onReject={rejectSuggestion}
           onUndo={undoAcceptedSuggestion}
@@ -266,7 +300,6 @@ function AiPreviewPanel({
   compact,
   proposal,
   acceptedCount,
-  onPreview,
   onAccept,
   onReject,
   onUndo,
@@ -278,18 +311,23 @@ function AiPreviewPanel({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="ai-preview-heading">
-        <span>✦ AI tutor</span>
-        <span className="ai-preview-badge">Simulated preview</span>
+        <span>✦ AI canvas</span>
+        <span className="ai-preview-badge">
+          {proposal ? "Model proposal" : "Voice controlled"}
+        </span>
       </div>
       <p className="ai-preview-copy" aria-live="polite">
-        {proposal?.description ??
-          "See how an AI-owned suggestion could appear over your diagram."}
+        {proposal
+          ? proposal.title + ": " + proposal.description
+          : "Ask what to draw, or request a complete reference architecture."}
       </p>
       <div className="ai-preview-actions">
         {proposal ? (
           <>
             <button className="ai-preview-button" type="button" onClick={onAccept}>
-              Accept
+              {proposal.kind === "reference_architecture"
+                ? "Keep reference"
+                : "Keep suggestion"}
             </button>
             <button
               className="ai-preview-button secondary"
@@ -299,11 +337,7 @@ function AiPreviewPanel({
               Reject
             </button>
           </>
-        ) : (
-          <button className="ai-preview-button" type="button" onClick={onPreview}>
-            Preview suggestion
-          </button>
-        )}
+        ) : null}
         {!proposal && acceptedCount > 0 ? (
           <button
             className="ai-preview-button secondary"
@@ -315,8 +349,8 @@ function AiPreviewPanel({
         ) : null}
       </div>
       <small className="ai-preview-hint">
-        Select a component first for a contextual placement. Preview objects are excluded
-        from interview evidence.
+        Select objects before asking for scoped help. Kept AI references remain editable
+        but excluded from candidate evidence.
       </small>
     </section>
   );

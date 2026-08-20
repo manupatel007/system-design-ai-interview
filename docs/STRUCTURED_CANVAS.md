@@ -31,6 +31,20 @@ Each snapshot contains:
 
 Bound Excalidraw text becomes the label of its container or connector instead of an independent node. Deleted elements are excluded. Arrays and identifiers are deterministically sorted so viewport changes do not create false scene changes.
 
+## AI Proposal Layer
+
+AI canvas proposals use the semantic model rather than screenshots. A proposal contains bounded
+nodes and edges with stable IDs, labels, roles, and relative layout hints. `scoped` proposals are
+anchored to the current selection or active question; `reference` proposals provide a complete,
+non-authoritative architecture skeleton for comparison.
+
+The frontend converts these records into purple ghost Excalidraw elements and presents Keep and
+Reject actions. Proposal elements are intentionally tagged with `customData.aiPreview=true` and
+remain outside the normalizer output even after Keep, so they cannot contaminate candidate evidence
+or trigger another interview turn. This separation lets a candidate copy, edit, or redraw a useful
+idea while preserving an auditable distinction between candidate reasoning and model reference
+material.
+
 ## Role Inference
 
 The browser derives compact roles from labels:

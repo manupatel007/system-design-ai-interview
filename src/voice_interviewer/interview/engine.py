@@ -7,9 +7,12 @@ from voice_interviewer.interview.models import (
     COMPETENCY_LABELS,
     PHASE_SEQUENCE,
     RUBRIC_LEVEL_ORDER,
+    AssistanceLevel,
     AssistancePolicy,
     AssistanceTurn,
     CandidateIntent,
+    CanvasProposal,
+    CanvasProposalKind,
     CanvasReference,
     CanvasReferenceKind,
     Competency,
@@ -42,6 +45,25 @@ REPEAT_QUESTION_PATTERN = re.compile(
 FINISH_PATTERN = re.compile(
     r"\b(?:i(?:'m| am) done|that(?:'s| is) all|finish (?:the )?interview|"
     r"wrap (?:it|this) up)\b",
+    re.IGNORECASE,
+)
+REFERENCE_ARCHITECTURE_PATTERN = re.compile(
+    r"\b(?:complete|full|entire|end[- ]to[- ]end)\s+"
+    r"(?:reference\s+)?(?:system\s+)?architecture\b"
+    r"|\breference architecture\b"
+    r"|\b(?:show|give|draw|create|provide)\s+(?:me\s+)?"
+    r"(?:a\s+|the\s+)?(?:complete\s+|full\s+)?"
+    r"(?:reference\s+)?architecture\b",
+    re.IGNORECASE,
+)
+CANVAS_PROPOSAL_PATTERN = re.compile(
+    r"\bwhat (?:can|could|should)\s+(?:i|we)\s+(?:draw|add)\b"
+    r"|\bwhat can be drawn\b"
+    r"|\bcan you\s+(?:draw|add|suggest|show)\s+(?:me\s+)?"
+    r"(?:a\s+|some\s+|the\s+)?(?:component|connection|relationship|box|node)"
+    r"|\b(?:draw|add|suggest|show)\s+(?:me\s+)?"
+    r"(?:a\s+|some\s+|the\s+)?(?:component|connection|relationship|box|node)"
+    r"|\bhelp me\s+(?:draw|with\s+(?:this\s+|the\s+)?(?:diagram|canvas))\b",
     re.IGNORECASE,
 )
 HELP_REQUEST_PATTERN = re.compile(
@@ -79,6 +101,7 @@ class InterviewEngineResult:
     feedback: FeedbackPlan | None = None
     assistance: AssistanceTurn | None = None
     canvas_references: tuple[CanvasReference, ...] = ()
+    canvas_proposal: CanvasProposal | None = None
 
 
 class StructuredInterviewEngine:
@@ -131,6 +154,19 @@ class StructuredInterviewEngine:
                 context=context,
                 candidate_transcript=transcript,
             )
+        if REFERENCE_ARCHITECTURE_PATTERN.search(transcript):
+            return await self._assist(
+                context,
+                transcript,
+                proposal_kind=CanvasProposalKind.REFERENCE,
+                level=AssistanceLevel.REFERENCE,
+            )
+        if CANVAS_PROPOSAL_PATTERN.search(transcript):
+            return await self._assist(
+                context,
+                transcript,
+                proposal_kind=CanvasProposalKind.SCOPED,
+            )
         if HELP_REQUEST_PATTERN.search(transcript):
             return await self._assist(context, transcript)
         plan = await self.llm.plan(self._context(context, "candidate"))
@@ -158,12 +194,32 @@ class StructuredInterviewEngine:
         self,
         context: InterviewContext,
         transcript: str,
+        *,
+        proposal_kind: CanvasProposalKind = CanvasProposalKind.NONE,
+        level: AssistanceLevel | None = None,
     ) -> InterviewEngineResult:
         assistance = self.state.preview_assistance(
-            self._selected_object_ids(context)
+            self._selected_object_ids(context),
+            level=level,
         )
         plan = await self.llm.plan(
-            self._context(context, "help", assistance=assistance)
+            self._context(
+                context,
+                "help",
+                assistance=assistance,
+                proposal_kind=proposal_kind,
+            )
+        )
+        max_nodes, max_edges = self._proposal_limits(
+            proposal_kind,
+            assistance.level,
+        )
+        canvas_proposal = self._validated_canvas_proposal(
+            plan.canvas_proposal,
+            context,
+            requested_kind=proposal_kind,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
         )
         plan = replace(
             plan,
@@ -182,12 +238,14 @@ class StructuredInterviewEngine:
             next_phase=self.state.phase,
             next_question=QuestionPlan(),
             final_feedback=FeedbackPlan(),
+            canvas_proposal=CanvasProposal(),
         )
         return self._apply(
             plan,
             context=context,
             candidate_transcript=transcript,
             assistance=assistance,
+            canvas_proposal=canvas_proposal,
         )
 
     def _context(
@@ -196,16 +254,43 @@ class StructuredInterviewEngine:
         turn_mode: str,
         *,
         assistance: AssistanceTurn | None = None,
+        proposal_kind: CanvasProposalKind = CanvasProposalKind.NONE,
     ) -> InterviewContext:
         runtime_directive = dict(context.runtime_directive)
         if assistance is not None:
             runtime_directive["assistance"] = assistance.to_dict()
+        if proposal_kind is not CanvasProposalKind.NONE and assistance is not None:
+            max_nodes, max_edges = self._proposal_limits(
+                proposal_kind,
+                assistance.level,
+            )
+            runtime_directive["canvasProposal"] = {
+                "kind": proposal_kind.value,
+                "maxNodes": max_nodes,
+                "maxEdges": max_edges,
+                "anchorObjectIds": list(assistance.object_ids),
+            }
         return replace(
             context,
             runtime_directive=runtime_directive,
             interview_state=self.state.prompt_dict(),
             turn_mode=turn_mode,
         )
+
+    @staticmethod
+    def _proposal_limits(
+        kind: CanvasProposalKind,
+        level: AssistanceLevel,
+    ) -> tuple[int, int]:
+        if kind is CanvasProposalKind.REFERENCE:
+            return 12, 18
+        if kind is CanvasProposalKind.NONE:
+            return 0, 0
+        if level is AssistanceLevel.NUDGE:
+            return 1, 2
+        if level is AssistanceLevel.CONCEPT:
+            return 2, 4
+        return 4, 6
 
     @staticmethod
     def _selected_object_ids(context: InterviewContext) -> tuple[str, ...]:
@@ -233,6 +318,7 @@ class StructuredInterviewEngine:
         candidate_transcript: str,
         force_complete: bool = False,
         assistance: AssistanceTurn | None = None,
+        canvas_proposal: CanvasProposal | None = None,
     ) -> InterviewEngineResult:
         if candidate_transcript:
             self.state.turn_index += 1
@@ -287,6 +373,8 @@ class StructuredInterviewEngine:
 
         if assistance is not None:
             self.state.record_assistance(assistance)
+        if canvas_proposal is not None:
+            self.state.record_canvas_proposal(canvas_proposal)
 
         self.state.history.append(
             TurnRecord(
@@ -311,6 +399,43 @@ class StructuredInterviewEngine:
                 context,
                 assistance=assistance,
             ),
+            canvas_proposal=canvas_proposal,
+        )
+
+    @staticmethod
+    def _validated_canvas_proposal(
+        proposal: CanvasProposal,
+        context: InterviewContext,
+        *,
+        requested_kind: CanvasProposalKind,
+        max_nodes: int,
+        max_edges: int,
+    ) -> CanvasProposal | None:
+        if requested_kind is CanvasProposalKind.NONE or proposal.is_empty:
+            return None
+        existing_node_ids = (
+            {node.id for node in context.diagram.nodes}
+            if context.diagram is not None
+            else set()
+        )
+        nodes = tuple(
+            node for node in proposal.nodes if node.id not in existing_node_ids
+        )[:max_nodes]
+        proposed_node_ids = {node.id for node in nodes}
+        allowed_endpoint_ids = existing_node_ids | proposed_node_ids
+        edges = tuple(
+            edge
+            for edge in proposal.edges
+            if edge.source_id in allowed_endpoint_ids
+            and edge.target_id in allowed_endpoint_ids
+        )[:max_edges]
+        if not nodes and not edges:
+            return None
+        return replace(
+            proposal,
+            kind=requested_kind,
+            nodes=nodes,
+            edges=edges,
         )
 
     @staticmethod

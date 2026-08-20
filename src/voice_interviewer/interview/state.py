@@ -8,6 +8,7 @@ from voice_interviewer.interview.models import (
     AssistancePolicy,
     AssistanceTurn,
     CandidateIntent,
+    CanvasProposal,
     Competency,
     DecisionUpdate,
     EvidenceSource,
@@ -107,6 +108,7 @@ class InterviewState:
     problem: str | None = None
     assistance_policy: AssistancePolicy = AssistancePolicy.ADAPTIVE
     assistance_history: list[AssistanceTurn] = field(default_factory=list)
+    canvas_proposals: list[CanvasProposal] = field(default_factory=list)
     _assistance_counts: dict[str, int] = field(default_factory=dict, repr=False)
     phase: InterviewPhase = InterviewPhase.INTRODUCTION
     turn_index: int = 0
@@ -127,6 +129,8 @@ class InterviewState:
     def preview_assistance(
         self,
         object_ids: tuple[str, ...] = (),
+        *,
+        level: AssistanceLevel | None = None,
     ) -> AssistanceTurn:
         normalized_ids = tuple(sorted(dict.fromkeys(object_ids)))[:8]
         scope_base = (
@@ -145,7 +149,7 @@ class InterviewState:
         )
         return AssistanceTurn(
             policy=self.assistance_policy,
-            level=self._assistance_level(request_index),
+            level=level or self._assistance_level(request_index),
             request_index=request_index,
             scope_id=scope_id,
             topic=topic,
@@ -165,6 +169,11 @@ class InterviewState:
                 for scope_id, count in self._assistance_counts.items()
                 if scope_id in active_scopes
             }
+
+    def record_canvas_proposal(self, proposal: CanvasProposal) -> None:
+        self.canvas_proposals.append(proposal)
+        if len(self.canvas_proposals) > 5:
+            del self.canvas_proposals[:-5]
 
     def _assistance_level(self, request_index: int) -> AssistanceLevel:
         if self.assistance_policy is AssistancePolicy.STRICT:
@@ -190,6 +199,9 @@ class InterviewState:
             "recentAssistance": [
                 item.to_dict() for item in self.assistance_history[-12:]
             ],
+            "recentCanvasProposals": [
+                item.to_dict() for item in self.canvas_proposals[-2:]
+            ],
             "currentQuestion": (
                 self.current_question.to_dict() if self.current_question else None
             ),
@@ -211,6 +223,10 @@ class InterviewState:
             "assistanceCount": len(self.assistance_history),
             "recentAssistance": [
                 item.to_dict() for item in self.assistance_history[-12:]
+            ],
+            "canvasProposalCount": len(self.canvas_proposals),
+            "recentCanvasProposals": [
+                item.to_dict() for item in self.canvas_proposals[-2:]
             ],
             "currentQuestion": (
                 self.current_question.to_dict() if self.current_question else None

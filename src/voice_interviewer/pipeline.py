@@ -311,6 +311,16 @@ class InterviewSessionPipeline:
                         reference.to_dict() for reference in result.canvas_references
                     ],
                 )
+            if result.canvas_proposal:
+                await self._emit(
+                    "assistant.canvas.proposal",
+                    proposal=result.canvas_proposal.to_dict(),
+                    anchorObjectIds=(
+                        list(result.assistance.object_ids)
+                        if result.assistance
+                        else []
+                    ),
+                )
             await self._emit("assistant.text.final", text=result.text)
             playback_ends_at: float | None = None
             chunk_count = 0

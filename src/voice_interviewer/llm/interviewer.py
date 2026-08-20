@@ -37,8 +37,16 @@ Behavior rules:
   help_request and action to assist. A nudge gives one diagnostic clue without a design answer.
   A concept explains one relevant principle or trade-off. An example gives one bounded concrete
   example for the active question or selected canvas area, then asks the candidate to adapt it.
+  A reference level may provide one complete illustrative architecture when explicitly requested.
   Keep the current phase and question, emit no evidence/rubric/assumption/decision/topic updates,
   and do not treat model-supplied content as candidate evidence.
+- Populate canvasProposal only when runtimeDirective.canvasProposal exists. Proposals are additive:
+  never delete, rename, or reposition candidate objects. Use exact existing node IDs only for
+  endpoints that connect to the current diagram; use short unique IDs for proposed nodes and edges.
+  Layer is a logical left-to-right column from 0 through 6, never a pixel coordinate. Obey maxNodes
+  and maxEdges. A scoped proposal supplies only the smallest useful addition. A
+  reference_architecture proposal supplies one coherent, illustrative end-to-end design for the
+  stated problem, not the uniquely correct answer. Otherwise return an empty none proposal.
 - Directly answer candidate and diagram-visibility questions before considering a probe.
   Mention only components and relationships present in diagramSnapshot.
 - Briefly acknowledge specific reasoning the candidate actually supplied. Never use empty
@@ -136,12 +144,22 @@ class GatewayInterviewLLM:
 
     @staticmethod
     def build_plan_request(context: InterviewContext) -> LLMRequest:
+        proposal_directive = context.runtime_directive.get("canvasProposal")
+        proposal_kind = (
+            proposal_directive.get("kind")
+            if isinstance(proposal_directive, dict)
+            else None
+        )
+        max_output_tokens = {
+            "scoped": 1_600,
+            "reference_architecture": 2_400,
+        }.get(proposal_kind, 1_200)
         return LLMRequest(
             messages=(
                 LLMMessage(role="system", content=PLANNER_SYSTEM_PROMPT),
                 LLMMessage(role="user", content=GatewayInterviewLLM.build_context(context)),
             ),
-            max_output_tokens=1_200,
+            max_output_tokens=max_output_tokens,
             response_schema=PLAN_RESPONSE_SCHEMA,
         )
 

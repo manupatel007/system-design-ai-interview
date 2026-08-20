@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeVar
 
@@ -65,6 +66,7 @@ class AssistanceLevel(StrEnum):
     NUDGE = "nudge"
     CONCEPT = "concept"
     EXAMPLE = "example"
+    REFERENCE = "reference"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,184 @@ class AssistanceTurn:
             "scopeId": self.scope_id,
             "topic": self.topic,
             "objectIds": list(self.object_ids),
+        }
+
+
+class CanvasProposalKind(StrEnum):
+    NONE = "none"
+    SCOPED = "scoped"
+    REFERENCE = "reference_architecture"
+
+
+class CanvasProposalNodeRole(StrEnum):
+    CLIENT = "client"
+    CDN = "cdn"
+    LOAD_BALANCER = "load_balancer"
+    GATEWAY = "gateway"
+    SERVICE = "service"
+    WORKER = "worker"
+    QUEUE = "queue"
+    STREAM = "stream"
+    CACHE = "cache"
+    DATABASE = "database"
+    OBJECT_STORAGE = "object_storage"
+    SEARCH = "search"
+    OBSERVABILITY = "observability"
+    EXTERNAL = "external"
+    OTHER = "other"
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasProposalNode:
+    id: str
+    label: str
+    role: CanvasProposalNodeRole
+    layer: int
+
+    @classmethod
+    def from_payload(cls, payload: object) -> CanvasProposalNode:
+        values = _object(payload, "canvas proposal node")
+        _keys(values, {"id", "label", "role", "layer"}, "canvas proposal node")
+        return cls(
+            id=_proposal_identifier(values.get("id"), "canvas proposal node id"),
+            label=_required_string(
+                values.get("label"), "canvas proposal node label", maximum=80
+            ),
+            role=_enum(
+                CanvasProposalNodeRole,
+                values.get("role"),
+                "canvas proposal node role",
+            ),
+            layer=_bounded_integer(
+                values.get("layer"),
+                "canvas proposal node layer",
+                minimum=0,
+                maximum=6,
+            ),
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "role": self.role.value,
+            "layer": self.layer,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasProposalEdge:
+    id: str
+    label: str
+    source_id: str
+    target_id: str
+
+    @classmethod
+    def from_payload(cls, payload: object) -> CanvasProposalEdge:
+        values = _object(payload, "canvas proposal edge")
+        _keys(
+            values,
+            {"id", "label", "sourceId", "targetId"},
+            "canvas proposal edge",
+        )
+        source_id = _proposal_identifier(
+            values.get("sourceId"), "canvas proposal edge source id"
+        )
+        target_id = _proposal_identifier(
+            values.get("targetId"), "canvas proposal edge target id"
+        )
+        if source_id == target_id:
+            raise InterviewPlanValidationError(
+                "canvas proposal edge endpoints must differ"
+            )
+        return cls(
+            id=_proposal_identifier(values.get("id"), "canvas proposal edge id"),
+            label=_string(
+                values.get("label"), "canvas proposal edge label", maximum=80
+            ),
+            source_id=source_id,
+            target_id=target_id,
+        )
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "sourceId": self.source_id,
+            "targetId": self.target_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasProposal:
+    kind: CanvasProposalKind = CanvasProposalKind.NONE
+    title: str = ""
+    summary: str = ""
+    nodes: tuple[CanvasProposalNode, ...] = ()
+    edges: tuple[CanvasProposalEdge, ...] = ()
+
+    @classmethod
+    def from_payload(cls, payload: object) -> CanvasProposal:
+        values = _object(payload, "canvasProposal")
+        _keys(
+            values,
+            {"kind", "title", "summary", "nodes", "edges"},
+            "canvasProposal",
+        )
+        kind = _enum(
+            CanvasProposalKind,
+            values.get("kind"),
+            "canvas proposal kind",
+        )
+        title = _string(values.get("title"), "canvas proposal title", maximum=120)
+        summary = _string(
+            values.get("summary"), "canvas proposal summary", maximum=360
+        )
+        nodes = tuple(
+            CanvasProposalNode.from_payload(item)
+            for item in _list(values.get("nodes"), "canvas proposal nodes", maximum=12)
+        )
+        edges = tuple(
+            CanvasProposalEdge.from_payload(item)
+            for item in _list(values.get("edges"), "canvas proposal edges", maximum=18)
+        )
+        identifiers = [item.id for item in (*nodes, *edges)]
+        if len(identifiers) != len(set(identifiers)):
+            raise InterviewPlanValidationError(
+                "canvas proposal entity ids must be unique"
+            )
+        if kind is CanvasProposalKind.NONE:
+            if title or summary or nodes or edges:
+                raise InterviewPlanValidationError(
+                    "empty canvas proposal must not contain content"
+                )
+        elif not title:
+            raise InterviewPlanValidationError(
+                "canvas proposal title is required"
+            )
+        elif not nodes and not edges:
+            raise InterviewPlanValidationError(
+                "canvas proposal must contain a node or edge"
+            )
+        return cls(
+            kind=kind,
+            title=title,
+            summary=summary,
+            nodes=nodes,
+            edges=edges,
+        )
+
+    @property
+    def is_empty(self) -> bool:
+        return self.kind is CanvasProposalKind.NONE
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind.value,
+            "title": self.title,
+            "summary": self.summary,
+            "nodes": [item.to_dict() for item in self.nodes],
+            "edges": [item.to_dict() for item in self.edges],
         }
 
 
@@ -332,6 +512,7 @@ class InterviewTurnPlan:
     next_question: QuestionPlan
     final_feedback: FeedbackPlan
     canvas_references: tuple[CanvasReference, ...] = ()
+    canvas_proposal: CanvasProposal = field(default_factory=CanvasProposal)
 
     def __post_init__(self) -> None:
         if self.utterance.count("?") > 1:
@@ -359,6 +540,7 @@ class InterviewTurnPlan:
             "nextQuestion",
             "finalFeedback",
             "canvasReferences",
+            "canvasProposal",
         }
         _keys(values, expected, "interview plan")
         return cls(
@@ -396,6 +578,9 @@ class InterviewTurnPlan:
                 CanvasReference.from_payload(item)
                 for item in _list(values.get("canvasReferences"), "canvasReferences", maximum=3)
             ),
+            canvas_proposal=CanvasProposal.from_payload(
+                values.get("canvasProposal")
+            ),
         )
 
 
@@ -422,6 +607,78 @@ INTERVIEW_PLAN_SCHEMA: dict[str, Any] = {
         },
         "acknowledgement": {"type": "string", "maxLength": 320},
         "utterance": {"type": "string", "minLength": 1, "maxLength": 800},
+        "canvasProposal": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [item.value for item in CanvasProposalKind],
+                },
+                "title": {"type": "string", "maxLength": 120},
+                "summary": {"type": "string", "maxLength": 360},
+                "nodes": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                            },
+                            "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 80,
+                            },
+                            "role": {
+                                "type": "string",
+                                "enum": [
+                                    item.value for item in CanvasProposalNodeRole
+                                ],
+                            },
+                            "layer": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 6,
+                            },
+                        },
+                        "required": ["id", "label", "role", "layer"],
+                    },
+                },
+                "edges": {
+                    "type": "array",
+                    "maxItems": 18,
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                            },
+                            "label": {"type": "string", "maxLength": 80},
+                            "sourceId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                            },
+                            "targetId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120,
+                            },
+                        },
+                        "required": ["id", "label", "sourceId", "targetId"],
+                    },
+                },
+            },
+            "required": ["kind", "title", "summary", "nodes", "edges"],
+        },
         "canvasReferences": {
             "type": "array",
             "maxItems": 3,
@@ -538,6 +795,7 @@ INTERVIEW_PLAN_SCHEMA: dict[str, Any] = {
         "acknowledgement",
         "utterance",
         "canvasReferences",
+        "canvasProposal",
         "evidenceUpdates",
         "rubricUpdates",
         "assumptions",
@@ -574,6 +832,31 @@ def _list(value: object, name: str, *, maximum: int) -> list[object]:
     if len(value) > maximum:
         raise InterviewPlanValidationError(f"{name} exceeds the limit of {maximum}")
     return value
+
+
+def _bounded_integer(
+    value: object,
+    name: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InterviewPlanValidationError(f"{name} must be an integer")
+    if value < minimum or value > maximum:
+        raise InterviewPlanValidationError(
+            f"{name} must be between {minimum} and {maximum}"
+        )
+    return value
+
+
+def _proposal_identifier(value: object, name: str) -> str:
+    normalized = _required_string(value, name, maximum=120)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", normalized) is None:
+        raise InterviewPlanValidationError(
+            f"{name} contains unsupported characters"
+        )
+    return normalized
 
 
 def _string(value: object, name: str, *, maximum: int) -> str:

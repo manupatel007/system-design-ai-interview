@@ -146,6 +146,7 @@ function normalizeAssistance(payload) {
     nudge: "Hint",
     concept: "Concept",
     example: "Worked example",
+    reference: "Reference architecture",
   };
   const level = String(payload?.level ?? "");
   if (!labels[level]) return null;
@@ -187,6 +188,12 @@ function showCanvasFeedback(
 
 function clearCanvasFeedback() {
   window.dispatchEvent(new Event("diagram.feedback.clear"));
+}
+
+function showCanvasProposal(proposal, anchorObjectIds, proposalId) {
+  window.dispatchEvent(new CustomEvent("diagram.proposal.show", {
+    detail: { proposal, anchorObjectIds, proposalId },
+  }));
 }
 
 function connect() {
@@ -273,6 +280,13 @@ function connect() {
           "assist",
         );
       }
+    }
+    if (event.type === "assistant.canvas.proposal") {
+      showCanvasProposal(
+        payload.proposal,
+        payload.anchorObjectIds,
+        "proposal-" + event.sequence,
+      );
     }
     if (event.type === "assistant.canvas.references") {
       pendingCanvasReferences = normalizeCanvasReferences(payload.references);

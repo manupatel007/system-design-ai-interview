@@ -11,6 +11,7 @@ from voice_interviewer.errors import ConfigurationError, LLMProviderError
 from voice_interviewer.llm.azure_foundry import AzureFoundryLLM
 from voice_interviewer.llm.databricks import DatabricksLLM
 from voice_interviewer.llm.http_gateway import HttpLLMGateway
+from voice_interviewer.llm.interviewer import GatewayInterviewLLM
 from voice_interviewer.llm.types import (
     LLMApiStyle,
     LLMJsonSchema,
@@ -134,6 +135,19 @@ async def test_databricks_returns_structured_interview_plan() -> None:
     assert evidence["turnMode"] == "candidate"
     assert evidence["runtimeDirective"]["assistance"]["level"] == "nudge"
     assert evidence["interviewState"]["phase"] == "requirements"
+
+
+def test_reference_architecture_plan_gets_larger_output_budget() -> None:
+    request = GatewayInterviewLLM.build_plan_request(
+        InterviewContext(
+            session_id="reference-budget",
+            runtime_directive={
+                "canvasProposal": {"kind": "reference_architecture"}
+            },
+        )
+    )
+
+    assert request.max_output_tokens == 2_400
 
 
 @pytest.mark.asyncio
@@ -377,6 +391,13 @@ def _interview_plan_payload() -> dict[str, object]:
         "acknowledgement": "That establishes latency.",
         "utterance": "That establishes latency. What scale should we support?",
         "canvasReferences": [],
+        "canvasProposal": {
+            "kind": "none",
+            "title": "",
+            "summary": "",
+            "nodes": [],
+            "edges": [],
+        },
         "evidenceUpdates": [
             {
                 "competency": "requirements_scope",

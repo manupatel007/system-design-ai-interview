@@ -213,6 +213,43 @@ chips. Clicking a chip restores and focuses its referenced area. These overlays 
 browser-only AI content, excluded from `canvas.snapshot`, and cleared on candidate speech,
 interruption, timeout, or disconnect.
 
+## Model-Driven Canvas Proposals
+
+An explicit draw-help request may produce an `assistant.canvas.proposal` event after the matching
+`assistant.assistance` event and before `assistant.text.final`:
+
+```json
+{
+  "type": "assistant.canvas.proposal",
+  "payload": {
+    "proposalId": "proposal-42",
+    "proposal": {
+      "kind": "scoped",
+      "title": "Add a cache lookup",
+      "summary": "Cache reads make the hot path explicit.",
+      "nodes": [],
+      "edges": [
+        {"id": "cache-flow", "sourceId": "api", "targetId": "cache", "label": "lookup"}
+      ]
+    },
+    "anchorObjectIds": ["api"]
+  }
+}
+```
+
+`kind` is `scoped` for a bounded suggestion and `reference` for a complete reference architecture.
+Scoped proposals may add only new nodes or edges and must reference existing IDs for anchors. A
+reference request explicitly overrides the strictness policy for that turn, but still remains
+non-evidentiary and additive. The reducer validates every proposal against the accepted diagram,
+filters unknown IDs, bounds node/edge counts, and drops malformed proposals rather than mutating
+candidate content.
+
+The browser renders proposals as purple ghost objects with a Keep/Reject decision. Keeping a
+proposal makes its objects editable but retains `customData.aiPreview=true`; therefore they remain
+excluded from future semantic snapshots, provider context, canvas quiet-time triggers, and rubric
+evidence. Reject removes the proposal. This keeps model-authored reference material visibly
+separate from candidate-authored design.
+
 ## Interview State Events
 
 `interview.state` is emitted after configuration and every accepted interviewer plan. Important fields include:

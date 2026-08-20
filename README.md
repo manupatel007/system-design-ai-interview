@@ -71,21 +71,20 @@ uv run voice-interviewer serve
 
 Open `http://127.0.0.1:8000` and join. The interviewer opens the requirements phase automatically. The meeting-style workspace keeps candidate and interviewer cards at the top, a scrollable conversation transcript on the left, and the Excalidraw architecture canvas as the primary surface. Interview setup remains available from the compact header menu, and final feedback appears beneath the transcript. Use **Finish interview** after your last explanation.
 
-### Try the AI Canvas Preview
+### Ask the AI What To Draw
 
-The canvas currently includes a browser-only simulated tutor interaction so the visual language can be evaluated before connecting it to the LLM:
+Canvas proposals are model-driven and additive: the interviewer can suggest missing components,
+labelled relationships, or a complete reference architecture without overwriting candidate work.
 
-1. Draw a component and select it.
-2. Choose **Preview suggestion** from the purple **AI tutor** panel.
-3. Inspect the dashed purple highlight, proposed component, connector, and tutor note.
-4. Choose **Accept**, **Reject**, or **Undo AI**.
+1. Draw and optionally select one or more components.
+2. Say **?What should I draw here??** for a bounded, selection-scoped suggestion, or **?Show me a complete reference architecture?** for a reference layout.
+3. Review the purple ghost objects and the explanation in the **AI canvas** panel.
+4. Choose **Keep suggestion / Keep reference** or **Reject**. Kept AI objects remain editable.
 
-Preview objects are deliberately excluded from semantic canvas snapshots, LLM context, canvas turn triggers, and rubric evidence. The control makes no model or network call and is not yet the production tutor-mode protocol.
-
-During a connected interview, grounded feedback is separate from that simulation. When the
-interviewer discusses exact diagram elements, numbered purple outlines appear on the canvas and
-matching transcript chips can refocus those areas later. Provider-supplied IDs are intersected
-with the latest accepted snapshot, and these temporary overlays never enter interview evidence.
+Proposal objects carry `aiPreview` metadata and are excluded from semantic snapshots, candidate
+evidence, and rubric scoring. The reducer validates IDs, limits size, and only permits proposals
+when the candidate explicitly asks for help. Grounded feedback remains separate: numbered purple
+outlines identify exact existing nodes or edges when the interviewer explains a diagram issue.
 
 ### Ask for Scoped Help
 

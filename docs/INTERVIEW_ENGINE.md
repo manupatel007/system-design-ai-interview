@@ -132,6 +132,23 @@ Databricks Responses and Azure Foundry Chat Completions receive the same strict 
 
 The gateway parses JSON and the interview model validates types, enums, fields, lengths, and array limits again locally. Malformed plans become secret-safe `response_failed` events rather than partially mutating session state.
 
+## Canvas Help as a Conversation Action
+
+Canvas help is treated as an explicit conversational action, not as an unsolicited model feature.
+The engine detects requests such as ?what should I draw here?? and ?show me a complete reference
+architecture,? records the request scope, and keeps the active interview question unchanged.
+
+For a scoped request, the provider receives the selected semantic object IDs and can propose a small
+missing component or a labelled relationship. For a reference request, the provider receives the
+current diagram plus the active topic and can return a bounded architecture skeleton. The reducer
+selects the assistance level, applies hard node/edge limits, validates references, and emits the
+proposal separately from spoken text. Neither proposal type advances the phase or creates evidence.
+
+The frontend shows proposals as reversible ghost layouts. **Keep** adds editable AI-authored
+objects for visual comparison; **Reject** removes them. Both paths preserve candidate-authored
+objects. AI-authored objects are tagged and filtered from semantic snapshots, so a candidate cannot
+accidentally receive rubric credit for accepting a reference design.
+
 ## Evidence and Rubric Policy
 
 The live rubric tracks coverage, not a final numeric score:

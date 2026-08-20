@@ -5,6 +5,11 @@ import re
 from voice_interviewer.interview.models import (
     AssistanceLevel,
     CandidateIntent,
+    CanvasProposal,
+    CanvasProposalEdge,
+    CanvasProposalKind,
+    CanvasProposalNode,
+    CanvasProposalNodeRole,
     CanvasReference,
     CanvasReferenceKind,
     Competency,
@@ -185,6 +190,29 @@ class MockInterviewLLM:
             if object_ids
             else ()
         )
+        canvas_proposal = self._canvas_proposal(context)
+        if canvas_proposal.kind is CanvasProposalKind.REFERENCE:
+            utterance = (
+                "I've placed one illustrative reference architecture beside your work; "
+                "it is a comparison aid, not the only correct answer. Which trade-off "
+                "would you change first?"
+            )
+        elif canvas_proposal.kind is CanvasProposalKind.SCOPED:
+            if level is AssistanceLevel.NUDGE:
+                utterance = (
+                    "I've previewed one small possible addition in purple. What would "
+                    "you keep or change?"
+                )
+            elif level is AssistanceLevel.CONCEPT:
+                utterance = (
+                    "I've previewed an addition that makes one system boundary explicit. "
+                    "How would you justify it for this workload?"
+                )
+            else:
+                utterance = (
+                    "I've previewed a bounded drawing example beside your design. How "
+                    "would you adapt it rather than copy it directly?"
+                )
         return self._plan(
             utterance=utterance,
             candidate_intent=CandidateIntent.HELP_REQUEST,
@@ -192,6 +220,275 @@ class MockInterviewLLM:
             question_status=self._current_question_status(context),
             next_phase=phase,
             canvas_references=references,
+            canvas_proposal=canvas_proposal,
+        )
+
+    def _canvas_proposal(self, context: InterviewContext) -> CanvasProposal:
+        request = context.runtime_directive.get("canvasProposal")
+        if not isinstance(request, dict):
+            return CanvasProposal()
+        try:
+            kind = CanvasProposalKind(str(request.get("kind", "")))
+        except ValueError:
+            return CanvasProposal()
+        max_nodes = self._bounded_directive_limit(request.get("maxNodes"), 12)
+        max_edges = self._bounded_directive_limit(request.get("maxEdges"), 18)
+        if kind is CanvasProposalKind.REFERENCE:
+            return self._reference_architecture(max_nodes, max_edges)
+        if kind is not CanvasProposalKind.SCOPED:
+            return CanvasProposal()
+        return self._scoped_canvas_proposal(
+            context,
+            request,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+
+    @staticmethod
+    def _bounded_directive_limit(value: object, maximum: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            return maximum
+        return min(maximum, max(0, value))
+
+    def _scoped_canvas_proposal(
+        self,
+        context: InterviewContext,
+        request: dict[str, object],
+        *,
+        max_nodes: int,
+        max_edges: int,
+    ) -> CanvasProposal:
+        diagram_nodes = context.diagram.nodes if context.diagram else ()
+        existing_ids = {node.id for node in diagram_nodes}
+        raw_anchors = request.get("anchorObjectIds")
+        anchor_ids = tuple(
+            item
+            for item in raw_anchors
+            if isinstance(item, str) and item in existing_ids
+        ) if isinstance(raw_anchors, list) else ()
+        if len(anchor_ids) >= 2 and max_edges:
+            return CanvasProposal(
+                kind=CanvasProposalKind.SCOPED,
+                title="Connect the selected components",
+                summary=(
+                    "A labelled request path makes the interaction explicit."
+                ),
+                edges=(
+                    CanvasProposalEdge(
+                        id="suggested-request-flow",
+                        label="request / response",
+                        source_id=anchor_ids[0],
+                        target_id=anchor_ids[1],
+                    ),
+                ),
+            )
+        existing_roles = {node.role for node in diagram_nodes}
+        choices = (
+            (
+                CanvasProposalNodeRole.CACHE,
+                "Read Cache",
+                "cache lookup",
+            ),
+            (
+                CanvasProposalNodeRole.DATABASE,
+                "Primary Store",
+                "read / write",
+            ),
+            (
+                CanvasProposalNodeRole.QUEUE,
+                "Event Queue",
+                "domain event",
+            ),
+            (
+                CanvasProposalNodeRole.WORKER,
+                "Async Worker",
+                "consume",
+            ),
+            (
+                CanvasProposalNodeRole.OBSERVABILITY,
+                "Metrics and Tracing",
+                "telemetry",
+            ),
+        )
+        role, label, edge_label = next(
+            (
+                candidate
+                for candidate in choices
+                if candidate[0].value not in existing_roles
+            ),
+            choices[-1],
+        )
+        identifier = f"suggested-{role.value.replace('_', '-')}"
+        suffix = 2
+        while identifier in existing_ids:
+            identifier = f"suggested-{role.value.replace('_', '-')}-{suffix}"
+            suffix += 1
+        nodes = (
+            CanvasProposalNode(
+                id=identifier,
+                label=label,
+                role=role,
+                layer=1,
+            ),
+        ) if max_nodes else ()
+        anchor_id = anchor_ids[0] if anchor_ids else (
+            diagram_nodes[0].id if diagram_nodes else None
+        )
+        edges = (
+            (
+                CanvasProposalEdge(
+                    id=f"suggested-{role.value}-flow",
+                    label=edge_label,
+                    source_id=anchor_id,
+                    target_id=identifier,
+                ),
+            )
+            if nodes and anchor_id and max_edges
+            else ()
+        )
+        if not nodes and not edges:
+            return CanvasProposal()
+        return CanvasProposal(
+            kind=CanvasProposalKind.SCOPED,
+            title=f"Consider adding {label}",
+            summary=(
+                "A minimal additive suggestion; validate its need and failure mode."
+            ),
+            nodes=nodes,
+            edges=edges,
+        )
+
+    @staticmethod
+    def _reference_architecture(
+        max_nodes: int,
+        max_edges: int,
+    ) -> CanvasProposal:
+        nodes = (
+            CanvasProposalNode(
+                "reference-client",
+                "Web / Mobile Client",
+                CanvasProposalNodeRole.CLIENT,
+                0,
+            ),
+            CanvasProposalNode(
+                "reference-gateway",
+                "API Gateway",
+                CanvasProposalNodeRole.GATEWAY,
+                1,
+            ),
+            CanvasProposalNode(
+                "reference-create",
+                "Short Link Service",
+                CanvasProposalNodeRole.SERVICE,
+                2,
+            ),
+            CanvasProposalNode(
+                "reference-redirect",
+                "Redirect Service",
+                CanvasProposalNodeRole.SERVICE,
+                2,
+            ),
+            CanvasProposalNode(
+                "reference-cache",
+                "Redis Cache",
+                CanvasProposalNodeRole.CACHE,
+                3,
+            ),
+            CanvasProposalNode(
+                "reference-store",
+                "URL Store",
+                CanvasProposalNodeRole.DATABASE,
+                4,
+            ),
+            CanvasProposalNode(
+                "reference-events",
+                "Click Event Queue",
+                CanvasProposalNodeRole.QUEUE,
+                3,
+            ),
+            CanvasProposalNode(
+                "reference-analytics-worker",
+                "Analytics Worker",
+                CanvasProposalNodeRole.WORKER,
+                4,
+            ),
+            CanvasProposalNode(
+                "reference-analytics-store",
+                "Analytics Store",
+                CanvasProposalNodeRole.DATABASE,
+                5,
+            ),
+        )[:max_nodes]
+        node_ids = {node.id for node in nodes}
+        candidate_edges = (
+            CanvasProposalEdge(
+                "reference-client-gateway",
+                "HTTPS",
+                "reference-client",
+                "reference-gateway",
+            ),
+            CanvasProposalEdge(
+                "reference-gateway-create",
+                "create short link",
+                "reference-gateway",
+                "reference-create",
+            ),
+            CanvasProposalEdge(
+                "reference-gateway-redirect",
+                "resolve code",
+                "reference-gateway",
+                "reference-redirect",
+            ),
+            CanvasProposalEdge(
+                "reference-redirect-cache",
+                "cache lookup",
+                "reference-redirect",
+                "reference-cache",
+            ),
+            CanvasProposalEdge(
+                "reference-redirect-store",
+                "cache miss",
+                "reference-redirect",
+                "reference-store",
+            ),
+            CanvasProposalEdge(
+                "reference-create-store",
+                "persist mapping",
+                "reference-create",
+                "reference-store",
+            ),
+            CanvasProposalEdge(
+                "reference-redirect-events",
+                "click event",
+                "reference-redirect",
+                "reference-events",
+            ),
+            CanvasProposalEdge(
+                "reference-events-worker",
+                "consume",
+                "reference-events",
+                "reference-analytics-worker",
+            ),
+            CanvasProposalEdge(
+                "reference-worker-store",
+                "aggregate",
+                "reference-analytics-worker",
+                "reference-analytics-store",
+            ),
+        )
+        edges = tuple(
+            edge
+            for edge in candidate_edges
+            if edge.source_id in node_ids and edge.target_id in node_ids
+        )[:max_edges]
+        return CanvasProposal(
+            kind=CanvasProposalKind.REFERENCE,
+            title="Illustrative URL shortener reference architecture",
+            summary=(
+                "Separates create, redirect, cache, durable storage, and analytics paths."
+            ),
+            nodes=nodes,
+            edges=edges,
         )
 
     def _requirements_plan(self, context: InterviewContext) -> InterviewTurnPlan:
@@ -663,6 +960,7 @@ class MockInterviewLLM:
         topics: tuple[str, ...] = (),
         feedback: FeedbackPlan | None = None,
         canvas_references: tuple[CanvasReference, ...] = (),
+        canvas_proposal: CanvasProposal | None = None,
     ) -> InterviewTurnPlan:
         return InterviewTurnPlan(
             candidate_intent=candidate_intent,
@@ -679,4 +977,5 @@ class MockInterviewLLM:
             next_question=next_question or QuestionPlan(),
             final_feedback=feedback or FeedbackPlan(),
             canvas_references=canvas_references,
+            canvas_proposal=canvas_proposal or CanvasProposal(),
         )

@@ -10,6 +10,11 @@ from voice_interviewer.interview.engine import StructuredInterviewEngine
 from voice_interviewer.interview.models import (
     AssistanceLevel,
     CandidateIntent,
+    CanvasProposal,
+    CanvasProposalEdge,
+    CanvasProposalKind,
+    CanvasProposalNode,
+    CanvasProposalNodeRole,
     CanvasReference,
     CanvasReferenceKind,
     Competency,
@@ -403,6 +408,152 @@ async def test_help_policy_controls_disclosure_depth(
     assert first.state["evidenceCount"] == 0
 
 
+@pytest.mark.asyncio
+async def test_scoped_draw_request_filters_and_bounds_provider_proposal() -> None:
+    proposal = CanvasProposal(
+        kind=CanvasProposalKind.REFERENCE,
+        title="Oversized provider proposal",
+        summary="The reducer must constrain this to a scoped addition.",
+        nodes=(
+            CanvasProposalNode(
+                "api",
+                "Invented replacement API",
+                CanvasProposalNodeRole.SERVICE,
+                0,
+            ),
+            CanvasProposalNode(
+                "suggested-cache",
+                "Read Cache",
+                CanvasProposalNodeRole.CACHE,
+                1,
+            ),
+            CanvasProposalNode(
+                "suggested-worker",
+                "Async Worker",
+                CanvasProposalNodeRole.WORKER,
+                2,
+            ),
+        ),
+        edges=(
+            CanvasProposalEdge(
+                "cache-flow",
+                "lookup",
+                "cache",
+                "suggested-cache",
+            ),
+            CanvasProposalEdge(
+                "missing-flow",
+                "invalid",
+                "suggested-cache",
+                "missing-node",
+            ),
+            CanvasProposalEdge(
+                "worker-flow",
+                "async",
+                "suggested-cache",
+                "suggested-worker",
+            ),
+        ),
+    )
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            _plan(
+                utterance="I've previewed one addition. What would you change?",
+                canvas_proposal=proposal,
+            ),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener", "adaptive")
+    started = await engine.start(_context())
+    question_id = started.state["currentQuestion"]["id"]
+
+    result = await engine.respond(
+        _context(
+            "What should I draw here?",
+            diagram=_diagram(),
+            selected_object_ids=("cache",),
+        )
+    )
+
+    assert result.canvas_proposal is not None
+    assert result.canvas_proposal.kind is CanvasProposalKind.SCOPED
+    assert [node.id for node in result.canvas_proposal.nodes] == [
+        "suggested-cache"
+    ]
+    assert [edge.id for edge in result.canvas_proposal.edges] == ["cache-flow"]
+    assert result.assistance is not None
+    assert result.assistance.level is AssistanceLevel.NUDGE
+    assert result.state["currentQuestion"]["id"] == question_id
+    assert result.state["canvasProposalCount"] == 1
+    assert result.state["evidenceCount"] == 0
+    help_context = planner.contexts[1]
+    directive = help_context.runtime_directive["canvasProposal"]
+    assert directive["kind"] == "scoped"
+    assert directive["maxNodes"] == 1
+    assert directive["anchorObjectIds"] == ["cache"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_reference_request_returns_complete_mock_architecture() -> None:
+    engine = StructuredInterviewEngine(MockInterviewLLM())
+    engine.configure("Design a URL shortener", "strict")
+    started = await engine.start(_context())
+    question_id = started.state["currentQuestion"]["id"]
+
+    result = await engine.respond(
+        _context("Show me a complete reference architecture.")
+    )
+
+    assert result.assistance is not None
+    assert result.assistance.level is AssistanceLevel.REFERENCE
+    assert result.canvas_proposal is not None
+    assert result.canvas_proposal.kind is CanvasProposalKind.REFERENCE
+    assert len(result.canvas_proposal.nodes) == 9
+    assert len(result.canvas_proposal.edges) == 9
+    assert result.state["currentQuestion"]["id"] == question_id
+    assert result.state["phase"] == "requirements"
+    assert result.state["canvasProposalCount"] == 1
+    assert "not the only correct answer" in result.text
+
+
+@pytest.mark.asyncio
+async def test_unsolicited_canvas_proposal_is_not_emitted_or_remembered() -> None:
+    proposal = CanvasProposal(
+        kind=CanvasProposalKind.SCOPED,
+        title="Unsolicited",
+        nodes=(
+            CanvasProposalNode(
+                "unsolicited-cache",
+                "Cache",
+                CanvasProposalNodeRole.CACHE,
+                1,
+            ),
+        ),
+    )
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            _plan(
+                utterance="Let's continue with requirements.",
+                canvas_proposal=proposal,
+            ),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener")
+    await engine.start(_context())
+
+    result = await engine.respond(
+        _context("Users need low-latency redirects.")
+    )
+
+    assert result.canvas_proposal is None
+    assert result.state["canvasProposalCount"] == 0
+    assert result.state["recentCanvasProposals"] == []
+
+
 def test_plan_rejects_multiple_spoken_questions() -> None:
     with pytest.raises(InterviewPlanValidationError, match="at most one question"):
         _plan(utterance="Why Redis? How will you invalidate it?")
@@ -515,6 +666,7 @@ def _plan(
     decisions: tuple[DecisionUpdate, ...] = (),
     covered_topics: tuple[str, ...] = (),
     canvas_references: tuple[CanvasReference, ...] = (),
+    canvas_proposal: CanvasProposal | None = None,
 ) -> InterviewTurnPlan:
     return InterviewTurnPlan(
         candidate_intent=CandidateIntent.ANSWER,
@@ -531,6 +683,7 @@ def _plan(
         next_question=next_question or QuestionPlan(),
         final_feedback=FeedbackPlan(),
         canvas_references=canvas_references,
+        canvas_proposal=canvas_proposal or CanvasProposal(),
     )
 
 

@@ -3,47 +3,110 @@ import test from "node:test";
 
 import {
   acceptAiProposal,
-  buildAiTutorProposal,
+  buildStructuredAiProposal,
   isAiPreviewElement,
   removeAiProposal,
 } from "./ai-preview.js";
 
-test("builds a contextual proposal beside the selected component", () => {
+test("builds a scoped structured proposal beside the selected component", () => {
   const elements = [
     component("api", 20, 40),
-    text("api-label", "api", "API Gateway"),
     component("db", 650, 40),
   ];
-
-  const proposal = buildAiTutorProposal(
+  const proposal = buildStructuredAiProposal(
     elements,
-    { api: true },
+    {
+      kind: "scoped",
+      title: "Add a cache",
+      summary: "Validate hit rate and fallback behavior.",
+      nodes: [
+        { id: "cache", label: "Read Cache", role: "cache", layer: 1 },
+      ],
+      edges: [
+        {
+          id: "api-cache",
+          label: "lookup",
+          sourceId: "api",
+          targetId: "cache",
+        },
+      ],
+    },
+    ["api"],
     { centerX: 400, centerY: 300 },
     "proposal-1",
   );
 
-  assert.equal(proposal.anchorId, "api");
-  assert.match(proposal.description, /API Gateway/);
-  assert.deepEqual(
-    proposal.skeletons.map((element) => element.customData.aiPreviewKind),
-    ["highlight", "component", "connector", "note"],
+  const proposedNode = proposal.skeletons.find(
+    (element) => element.customData.aiProposalEntityId === "cache",
+  );
+  assert.equal(proposal.kind, "scoped");
+  assert.equal(proposal.anchorIds[0], "api");
+  assert.match(proposal.description, /fallback/);
+  assert.ok(proposedNode.x > elements[0].x + elements[0].width);
+  assert.ok(
+    proposal.skeletons.some(
+      (element) => element.customData.aiPreviewKind === "connector",
+    ),
   );
   assert.ok(proposal.skeletons.every(isAiPreviewElement));
-  assert.ok(proposal.skeletons[1].x > elements[0].x + elements[0].width);
 });
 
-test("moves a proposal to avoid an occupied location", () => {
-  const anchor = component("api", 20, 40);
-  const occupied = component("worker", 330, 28);
-
-  const proposal = buildAiTutorProposal(
-    [anchor, occupied],
-    { api: true },
-    { centerX: 400, centerY: 300 },
+test("lays out a reference architecture in semantic layers", () => {
+  const proposal = buildStructuredAiProposal(
+    [component("candidate-api", 0, 0)],
+    {
+      kind: "reference_architecture",
+      title: "Reference architecture",
+      summary: "One illustrative design.",
+      nodes: [
+        { id: "client", label: "Client", role: "client", layer: 0 },
+        { id: "api", label: "API", role: "service", layer: 1 },
+        { id: "cache", label: "Cache", role: "cache", layer: 2 },
+        { id: "store", label: "Store", role: "database", layer: 2 },
+      ],
+      edges: [
+        {
+          id: "client-api",
+          label: "HTTPS",
+          sourceId: "client",
+          targetId: "api",
+        },
+        {
+          id: "api-cache",
+          label: "lookup",
+          sourceId: "api",
+          targetId: "cache",
+        },
+        {
+          id: "invalid",
+          label: "ignored",
+          sourceId: "api",
+          targetId: "missing",
+        },
+      ],
+    },
+    [],
+    { centerX: 500, centerY: 300 },
     "proposal-2",
   );
 
-  assert.ok(proposal.skeletons[1].y > occupied.y + occupied.height);
+  const nodes = new Map(
+    proposal.skeletons
+      .filter((element) => element.customData.aiPreviewKind === "component")
+      .map((element) => [element.customData.aiProposalEntityId, element]),
+  );
+  const connectors = proposal.skeletons.filter(
+    (element) => element.customData.aiPreviewKind === "connector",
+  );
+  assert.ok(nodes.get("client").x < nodes.get("api").x);
+  assert.ok(nodes.get("api").x < nodes.get("cache").x);
+  assert.equal(nodes.get("cache").x, nodes.get("store").x);
+  assert.equal(connectors.length, 2);
+  assert.ok(
+    proposal.skeletons.some(
+      (element) => element.customData.aiPreviewKind === "proposal-frame",
+    ),
+  );
 });
 
 test("accepts and removes only the targeted AI proposal", () => {
@@ -54,6 +117,7 @@ test("accepts and removes only the targeted AI proposal", () => {
   const accepted = acceptAiProposal([candidate, first, second], "proposal-1");
 
   assert.equal(accepted[1].customData.aiPreviewStatus, "accepted");
+  assert.equal(accepted[1].customData.aiPreview, true);
   assert.equal(accepted[1].strokeStyle, "solid");
   assert.equal(accepted[1].locked, false);
   assert.deepEqual(
@@ -70,20 +134,6 @@ function component(id, x, y) {
     y,
     width: 160,
     height: 80,
-    isDeleted: false,
-  };
-}
-
-function text(id, containerId, value) {
-  return {
-    id,
-    type: "text",
-    containerId,
-    text: value,
-    x: 0,
-    y: 0,
-    width: 100,
-    height: 20,
     isDeleted: false,
   };
 }

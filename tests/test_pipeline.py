@@ -11,6 +11,10 @@ from voice_interviewer.interview.models import (
     AssistanceLevel,
     AssistancePolicy,
     AssistanceTurn,
+    CanvasProposal,
+    CanvasProposalKind,
+    CanvasProposalNode,
+    CanvasProposalNodeRole,
     CanvasReference,
     CanvasReferenceKind,
 )
@@ -160,6 +164,18 @@ async def test_pipeline_emits_grounded_canvas_references_before_text(
                     ("api-db",),
                 ),
             ),
+            canvas_proposal=CanvasProposal(
+                kind=CanvasProposalKind.SCOPED,
+                title="Add a cache",
+                nodes=(
+                    CanvasProposalNode(
+                        "suggested-cache",
+                        "Read Cache",
+                        CanvasProposalNodeRole.CACHE,
+                        1,
+                    ),
+                ),
+            ),
         )
 
     pipeline = InterviewSessionPipeline(
@@ -182,15 +198,23 @@ async def test_pipeline_emits_grounded_canvas_references_before_text(
     reference_event = next(
         event for event in events if event["type"] == "assistant.canvas.references"
     )
+    proposal_event = next(
+        event for event in events if event["type"] == "assistant.canvas.proposal"
+    )
     assert event_types.index("assistant.assistance") < event_types.index(
         "assistant.canvas.references"
     )
     assert event_types.index("assistant.canvas.references") < event_types.index(
+        "assistant.canvas.proposal"
+    )
+    assert event_types.index("assistant.canvas.proposal") < event_types.index(
         "assistant.text.final"
     )
     assert assistance_event["payload"]["level"] == "nudge"
     assert assistance_event["payload"]["requestIndex"] == 1
     assert reference_event["payload"]["references"][0]["objectIds"] == ["api-db"]
+    assert proposal_event["payload"]["proposal"]["kind"] == "scoped"
+    assert proposal_event["payload"]["anchorObjectIds"] == ["api-db"]
 
 
 @pytest.mark.asyncio
