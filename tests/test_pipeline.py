@@ -6,6 +6,11 @@ import numpy as np
 import pytest
 
 from voice_interviewer.audio import float32_to_pcm16
+from voice_interviewer.interview.engine import InterviewEngineResult
+from voice_interviewer.interview.models import (
+    CanvasReference,
+    CanvasReferenceKind,
+)
 from voice_interviewer.llm.mock import MockInterviewLLM
 from voice_interviewer.models import AudioOutput
 from voice_interviewer.pipeline import InterviewSessionPipeline
@@ -122,6 +127,51 @@ async def test_pipeline_emits_streamed_tts_chunks_in_order(mock_settings) -> Non
 
     chunks = [event for event in events if event["type"] == "assistant.audio.chunk"]
     assert [chunk["payload"]["chunkIndex"] for chunk in chunks] == [0, 1]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_emits_grounded_canvas_references_before_text(
+    mock_settings,
+) -> None:
+    events = []
+
+    async def capture(event):
+        events.append(event)
+
+    async def produce() -> InterviewEngineResult:
+        return InterviewEngineResult(
+            text="The highlighted relation needs a label.",
+            state={"phase": "high_level_design"},
+            canvas_references=(
+                CanvasReference(
+                    CanvasReferenceKind.ISSUE,
+                    "Protocol is not labelled",
+                    ("api-db",),
+                ),
+            ),
+        )
+
+    pipeline = InterviewSessionPipeline(
+        session_id="canvas-reference-session",
+        settings=mock_settings,
+        stt=MockSTT(""),
+        llm=MockInterviewLLM(),
+        tts=ChunkedTTS(),
+        vad=EnergyVad(),
+        send_event=capture,
+    )
+
+    await pipeline._execute_interview(produce)
+    await pipeline.close()
+
+    event_types = [event["type"] for event in events]
+    reference_event = next(
+        event for event in events if event["type"] == "assistant.canvas.references"
+    )
+    assert event_types.index("assistant.canvas.references") < event_types.index(
+        "assistant.text.final"
+    )
+    assert reference_event["payload"]["references"][0]["objectIds"] == ["api-db"]
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,10 @@ import {
   buildAiTutorProposal,
   removeAiProposal,
 } from "./ai-preview.js";
+import {
+  buildCanvasFeedbackOverlays,
+  removeCanvasFeedback,
+} from "./canvas-feedback.js";
 import "./ai-preview.css";
 import { buildDelta, normalizeScene, sceneFingerprint } from "./diagram.js";
 
@@ -23,6 +27,7 @@ function DiagramEditor() {
   const revision = useRef(0);
   const previous = useRef(null);
   const previousFingerprint = useRef("");
+  const feedbackTimer = useRef(null);
   const [activeProposal, setActiveProposal] = useState(null);
   const [acceptedProposalIds, setAcceptedProposalIds] = useState([]);
 
@@ -45,8 +50,83 @@ function DiagramEditor() {
     }, 350);
   }, []);
 
+  const clearCanvasFeedback = useCallback(() => {
+    const instance = api.current;
+    window.clearTimeout(feedbackTimer.current);
+    if (!instance) return;
+    const currentElements = [...instance.getSceneElements()];
+    const nextElements = removeCanvasFeedback(currentElements);
+    if (nextElements.length === currentElements.length) return;
+    instance.updateScene({
+      elements: nextElements,
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  }, []);
+
+  const showCanvasFeedback = useCallback(
+    (detail = {}) => {
+      const instance = api.current;
+      if (!instance) return;
+      window.clearTimeout(feedbackTimer.current);
+      const currentElements = [...instance.getSceneElements()];
+      const baseElements = removeCanvasFeedback(currentElements);
+      const references = Array.isArray(detail.references) ? detail.references : [];
+      const feedbackId = String(detail.feedbackId ?? `feedback-${Date.now()}`);
+      const overlay = buildCanvasFeedbackOverlays(
+        baseElements,
+        references,
+        feedbackId,
+      );
+      if (!overlay.skeletons.length) {
+        if (baseElements.length !== currentElements.length) {
+          instance.updateScene({
+            elements: baseElements,
+            captureUpdate: CaptureUpdateAction.NEVER,
+          });
+        }
+        return;
+      }
+      const converted = convertToExcalidrawElements(overlay.skeletons, {
+        regenerateIds: false,
+      }).map((element) => ({
+        ...element,
+        locked: true,
+        customData: {
+          ...element.customData,
+          author: "ai",
+          aiPreview: true,
+          aiCanvasFeedback: true,
+          aiFeedbackId: feedbackId,
+        },
+      }));
+      instance.updateScene({
+        elements: [...baseElements, ...converted],
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+      if (detail.focus) {
+        const targetIds = new Set(overlay.targetIds);
+        const targets = baseElements.filter((element) => targetIds.has(element.id));
+        if (targets.length) {
+          instance.scrollToContent(targets, {
+            fitToViewport: true,
+            viewportZoomFactor: 0.55,
+            minZoom: 0.5,
+            maxZoom: 1.25,
+            animate: true,
+            duration: 450,
+          });
+        }
+      }
+      const requestedDuration = Number(detail.durationMs) || 18_000;
+      const duration = Math.min(30_000, Math.max(5_000, requestedDuration));
+      feedbackTimer.current = window.setTimeout(clearCanvasFeedback, duration);
+    },
+    [clearCanvasFeedback],
+  );
+
   useEffect(() => {
     const clear = () => {
+      window.clearTimeout(feedbackTimer.current);
       api.current?.updateScene({ elements: [] });
       setActiveProposal(null);
       setAcceptedProposalIds([]);
@@ -55,8 +135,20 @@ function DiagramEditor() {
     return () => {
       window.removeEventListener("diagram.clear", clear);
       window.clearTimeout(timer.current);
+      window.clearTimeout(feedbackTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    const show = ({ detail }) => showCanvasFeedback(detail);
+    const clear = () => clearCanvasFeedback();
+    window.addEventListener("diagram.feedback.show", show);
+    window.addEventListener("diagram.feedback.clear", clear);
+    return () => {
+      window.removeEventListener("diagram.feedback.show", show);
+      window.removeEventListener("diagram.feedback.clear", clear);
+    };
+  }, [clearCanvasFeedback, showCanvasFeedback]);
 
   const previewSuggestion = useCallback(() => {
     const instance = api.current;

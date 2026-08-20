@@ -4,6 +4,8 @@ import re
 
 from voice_interviewer.interview.models import (
     CandidateIntent,
+    CanvasReference,
+    CanvasReferenceKind,
     Competency,
     DecisionUpdate,
     EvidenceSource,
@@ -230,6 +232,35 @@ class MockInterviewLLM:
                     text="Which component receives the request, and where does data go next?",
                     topic="high-level architecture",
                     expected_evidence=(Competency.ARCHITECTURE_FLOW,),
+                ),
+            )
+        unlabeled_edges = (
+            tuple(edge for edge in context.diagram.edges if not edge.label)[:2]
+            if context.diagram
+            else ()
+        )
+        if unlabeled_edges:
+            return self._plan(
+                utterance=(
+                    "I can follow the components, but the highlighted relationships are not "
+                    "labelled, so their protocol or purpose is unclear. What does each "
+                    "interaction represent?"
+                ),
+                candidate_intent=CandidateIntent.PARTIAL_ANSWER,
+                question_status=QuestionStatus.PARTIAL,
+                next_phase=InterviewPhase.HIGH_LEVEL_DESIGN,
+                next_question=QuestionPlan(
+                    text="What does each highlighted interaction represent?",
+                    topic="high-level architecture",
+                    expected_evidence=(Competency.ARCHITECTURE_FLOW,),
+                ),
+                canvas_references=tuple(
+                    CanvasReference(
+                        CanvasReferenceKind.ISSUE,
+                        "Relationship lacks a protocol or purpose",
+                        (edge.id,),
+                    )
+                    for edge in unlabeled_edges
                 ),
             )
         source = EvidenceSource.COMBINED if object_ids else EvidenceSource.TRANSCRIPT
@@ -519,6 +550,7 @@ class MockInterviewLLM:
         decisions: tuple[DecisionUpdate, ...] = (),
         topics: tuple[str, ...] = (),
         feedback: FeedbackPlan | None = None,
+        canvas_references: tuple[CanvasReference, ...] = (),
     ) -> InterviewTurnPlan:
         return InterviewTurnPlan(
             candidate_intent=candidate_intent,
@@ -534,4 +566,5 @@ class MockInterviewLLM:
             next_phase=next_phase,
             next_question=next_question or QuestionPlan(),
             final_feedback=feedback or FeedbackPlan(),
+            canvas_references=canvas_references,
         )

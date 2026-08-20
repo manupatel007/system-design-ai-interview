@@ -145,6 +145,41 @@ Requests evidence-backed completion. The browser stops and flushes the microphon
 }
 ```
 
+## Grounded Canvas Feedback
+
+`assistant.canvas.references` is emitted immediately before the matching
+`assistant.text.final` event when the spoken response discusses exact diagram areas:
+
+```json
+{
+  "type": "assistant.canvas.references",
+  "payload": {
+    "references": [
+      {
+        "kind": "issue",
+        "label": "Protocol is not labelled",
+        "objectIds": ["api-db"]
+      },
+      {
+        "kind": "issue",
+        "label": "Ownership boundary is unclear",
+        "objectIds": ["api", "worker", "db"]
+      }
+    ]
+  }
+}
+```
+
+The provider may propose at most three references using node or edge IDs from the accepted
+`diagramSnapshot`. The interview reducer intersects every reference with current diagram IDs and
+drops empty references. Multiple object IDs represent a region, such as a cluster whose boundary
+is unclear.
+
+The browser draws temporary numbered purple outlines and adds matching clickable transcript
+chips. Clicking a chip restores and focuses its referenced area. These overlays are tagged as
+browser-only AI content, excluded from `canvas.snapshot`, and cleared on candidate speech,
+interruption, timeout, or disconnect.
+
 ## Interview State Events
 
 `interview.state` is emitted after configuration and every accepted interviewer plan. Important fields include:
@@ -223,6 +258,7 @@ Rubric levels are coverage markers (`not_observed`, `some_evidence`, or `demonst
 | `candidate.transcript.rejected` | reason, `durationMs` | No reliable speech decode was accepted; candidate may retry |
 | `candidate.transcript.final` | text, language, duration | Stable text available |
 | `assistant.response.started` | none | Turn gate yielded the floor |
+| `assistant.canvas.references` | validated reference kind, label, and object IDs | Highlight exact areas discussed by the response |
 | `assistant.text.final` | `text` | Interviewer response text |
 | `assistant.audio.chunk` | audio, encoding, sample rate, channels, `chunkIndex` | Sequential playable PCM audio |
 | `assistant.response.completed` | none | All response output was emitted |

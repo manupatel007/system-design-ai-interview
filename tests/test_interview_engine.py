@@ -9,6 +9,8 @@ from voice_interviewer.errors import LLMProviderError
 from voice_interviewer.interview.engine import StructuredInterviewEngine
 from voice_interviewer.interview.models import (
     CandidateIntent,
+    CanvasReference,
+    CanvasReferenceKind,
     Competency,
     DecisionUpdate,
     EvidenceSource,
@@ -50,6 +52,32 @@ async def test_mock_interview_progresses_from_evidence_not_random_questions() ->
     rubric = {item["competency"]: item for item in estimation.state["rubric"]}
     assert rubric["requirements_scope"]["level"] == "demonstrated"
     assert rubric["capacity_estimation"]["level"] == "some_evidence"
+
+
+@pytest.mark.asyncio
+async def test_mock_interviewer_points_to_unlabelled_relationships() -> None:
+    engine = StructuredInterviewEngine(MockInterviewLLM())
+    engine.configure("Design a URL shortener")
+    await engine.start(_context())
+    await engine.respond(
+        _context(
+            "Users create short links, and redirects need low latency and high availability."
+        )
+    )
+    await engine.respond(
+        _context("We expect 10 million redirects daily and 100 writes per second.")
+    )
+
+    result = await engine.respond(
+        _context(
+            "The client sends a request to the API, which calls Redis and PostgreSQL.",
+            diagram=_diagram(edge_label=""),
+        )
+    )
+
+    assert result.state["phase"] == "high_level_design"
+    assert result.canvas_references[0].object_ids == ("api-cache",)
+    assert "highlighted relationships" in result.text
 
 
 @pytest.mark.asyncio
@@ -205,6 +233,41 @@ async def test_diagram_shape_alone_does_not_upgrade_rubric() -> None:
     assert result.state["phase"] == "requirements"
 
 
+@pytest.mark.asyncio
+async def test_canvas_references_keep_only_current_diagram_ids() -> None:
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            _plan(
+                utterance="The highlighted relation is not labelled. What does it carry?",
+                canvas_references=(
+                    CanvasReference(
+                        CanvasReferenceKind.ISSUE,
+                        "Protocol is not labelled",
+                        ("api-cache", "invented-edge", "api-cache"),
+                    ),
+                    CanvasReference(
+                        CanvasReferenceKind.FOCUS,
+                        "Unknown target",
+                        ("missing",),
+                    ),
+                ),
+            ),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener")
+    await engine.start(_context())
+
+    result = await engine.respond(
+        _context("The API calls Redis.", diagram=_diagram())
+    )
+
+    assert len(result.canvas_references) == 1
+    assert result.canvas_references[0].object_ids == ("api-cache",)
+    assert result.canvas_references[0].label == "Protocol is not labelled"
+
+
 def test_plan_rejects_multiple_spoken_questions() -> None:
     with pytest.raises(InterviewPlanValidationError, match="at most one question"):
         _plan(utterance="Why Redis? How will you invalidate it?")
@@ -310,6 +373,7 @@ def _plan(
     assumptions: tuple[str, ...] = (),
     decisions: tuple[DecisionUpdate, ...] = (),
     covered_topics: tuple[str, ...] = (),
+    canvas_references: tuple[CanvasReference, ...] = (),
 ) -> InterviewTurnPlan:
     return InterviewTurnPlan(
         candidate_intent=CandidateIntent.ANSWER,
@@ -325,10 +389,11 @@ def _plan(
         next_phase=next_phase,
         next_question=next_question or QuestionPlan(),
         final_feedback=FeedbackPlan(),
+        canvas_references=canvas_references,
     )
 
 
-def _diagram() -> DiagramSnapshot:
+def _diagram(*, edge_label: str = "lookup") -> DiagramSnapshot:
     return DiagramSnapshot.from_payload(
         {
             "version": 1,
@@ -342,7 +407,7 @@ def _diagram() -> DiagramSnapshot:
                 {
                     "id": "api-cache",
                     "shape": "arrow",
-                    "label": "lookup",
+                    "label": edge_label,
                     "sourceId": "api",
                     "targetId": "cache",
                     "groupIds": [],

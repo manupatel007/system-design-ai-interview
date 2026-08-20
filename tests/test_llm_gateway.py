@@ -374,6 +374,7 @@ def _interview_plan_payload() -> dict[str, object]:
         "questionStatus": "answered",
         "acknowledgement": "That establishes latency.",
         "utterance": "That establishes latency. What scale should we support?",
+        "canvasReferences": [],
         "evidenceUpdates": [
             {
                 "competency": "requirements_scope",

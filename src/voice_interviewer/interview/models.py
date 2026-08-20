@@ -104,6 +104,52 @@ class EvidenceSource(StrEnum):
     COMBINED = "combined"
 
 
+class CanvasReferenceKind(StrEnum):
+    ISSUE = "issue"
+    FOCUS = "focus"
+    POSITIVE = "positive"
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasReference:
+    kind: CanvasReferenceKind
+    label: str
+    object_ids: tuple[str, ...]
+
+    @classmethod
+    def from_payload(cls, payload: object) -> CanvasReference:
+        values = _object(payload, "canvas reference")
+        _keys(values, {"kind", "label", "objectIds"}, "canvas reference")
+        object_ids = tuple(
+            _required_string(item, "canvas reference object id", maximum=120)
+            for item in _list(
+                values.get("objectIds"), "canvas reference object ids", maximum=8
+            )
+        )
+        if not object_ids:
+            raise InterviewPlanValidationError(
+                "canvas reference objectIds must not be empty"
+            )
+        return cls(
+            kind=_enum(
+                CanvasReferenceKind,
+                values.get("kind"),
+                "canvas reference kind",
+            ),
+            label=_required_string(
+                values.get("label"), "canvas reference label", maximum=160
+            ),
+            object_ids=object_ids,
+        )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "kind": self.kind.value,
+            "label": self.label,
+            "objectIds": list(self.object_ids),
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class QuestionPlan:
     text: str = ""
@@ -251,6 +297,7 @@ class InterviewTurnPlan:
     next_phase: InterviewPhase
     next_question: QuestionPlan
     final_feedback: FeedbackPlan
+    canvas_references: tuple[CanvasReference, ...] = ()
 
     def __post_init__(self) -> None:
         if self.utterance.count("?") > 1:
@@ -277,6 +324,7 @@ class InterviewTurnPlan:
             "nextPhase",
             "nextQuestion",
             "finalFeedback",
+            "canvasReferences",
         }
         _keys(values, expected, "interview plan")
         return cls(
@@ -310,6 +358,10 @@ class InterviewTurnPlan:
             next_phase=_enum(InterviewPhase, values.get("nextPhase"), "next phase"),
             next_question=QuestionPlan.from_payload(values.get("nextQuestion")),
             final_feedback=FeedbackPlan.from_payload(values.get("finalFeedback")),
+            canvas_references=tuple(
+                CanvasReference.from_payload(item)
+                for item in _list(values.get("canvasReferences"), "canvasReferences", maximum=3)
+            ),
         )
 
 
@@ -336,6 +388,28 @@ INTERVIEW_PLAN_SCHEMA: dict[str, Any] = {
         },
         "acknowledgement": {"type": "string", "maxLength": 320},
         "utterance": {"type": "string", "minLength": 1, "maxLength": 800},
+        "canvasReferences": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": [item.value for item in CanvasReferenceKind],
+                    },
+                    "label": {"type": "string", "minLength": 1, "maxLength": 160},
+                    "objectIds": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "items": {"type": "string", "minLength": 1, "maxLength": 120},
+                    },
+                },
+                "required": ["kind", "label", "objectIds"],
+            },
+        },
         "evidenceUpdates": {
             "type": "array",
             "maxItems": 8,
@@ -429,6 +503,7 @@ INTERVIEW_PLAN_SCHEMA: dict[str, Any] = {
         "questionStatus",
         "acknowledgement",
         "utterance",
+        "canvasReferences",
         "evidenceUpdates",
         "rubricUpdates",
         "assumptions",

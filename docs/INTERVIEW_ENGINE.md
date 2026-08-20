@@ -106,6 +106,7 @@ Databricks Responses and Azure Foundry Chat Completions receive the same strict 
 - Requested next phase.
 - Optional next question represented by an empty or populated required object.
 - Optional final feedback represented by required fields with empty defaults.
+- Up to three grounded canvas references, or an empty required array.
 
 The gateway parses JSON and the interview model validates types, enums, fields, lengths, and array limits again locally. Malformed plans become secret-safe `response_failed` events rather than partially mutating session state.
 
@@ -146,6 +147,7 @@ The meeting-style UI keeps the current phase and active question on the intervie
 
 - Candidate transcript, diagram content, and state JSON are explicitly untrusted in the planner prompt.
 - Diagram object IDs in evidence are intersected with the accepted snapshot.
+- Canvas feedback IDs are independently intersected with the accepted snapshot before emission.
 - Diagram-only evidence cannot change the rubric.
 - Phase transitions are adjacent and reducer-controlled.
 - Assumptions, decisions, topics, prompt history, labels, and plan arrays are bounded.
@@ -159,6 +161,7 @@ The test suite covers:
 - Coherent mock progression across all phases.
 - Irrelevant and partial answers retaining the current thread.
 - Diagram visibility questions bypassing the provider and preserving the question ID.
+- Grounded canvas references filtering invented IDs and preserving event order.
 - Assumption, decision, topic, evidence, and rubric updates.
 - Rejected phase skips.
 - Diagram-only evidence not upgrading a rubric.

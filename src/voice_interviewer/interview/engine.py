@@ -8,6 +8,7 @@ from voice_interviewer.interview.models import (
     PHASE_SEQUENCE,
     RUBRIC_LEVEL_ORDER,
     CandidateIntent,
+    CanvasReference,
     Competency,
     EvidenceSource,
     FeedbackPlan,
@@ -60,6 +61,7 @@ class InterviewEngineResult:
     text: str
     state: dict[str, object]
     feedback: FeedbackPlan | None = None
+    canvas_references: tuple[CanvasReference, ...] = ()
 
 
 class StructuredInterviewEngine:
@@ -200,7 +202,31 @@ class StructuredInterviewEngine:
             text=plan.utterance,
             state=self.state.client_dict(),
             feedback=self.state.feedback if self.state.completed else None,
+            canvas_references=self._validated_canvas_references(plan, context),
         )
+
+    @staticmethod
+    def _validated_canvas_references(
+        plan: InterviewTurnPlan,
+        context: InterviewContext,
+    ) -> tuple[CanvasReference, ...]:
+        if context.diagram is None:
+            return ()
+        valid_ids = {
+            item.id for item in (*context.diagram.nodes, *context.diagram.edges)
+        }
+        references: list[CanvasReference] = []
+        for reference in plan.canvas_references[:3]:
+            object_ids = tuple(
+                dict.fromkeys(
+                    identifier
+                    for identifier in reference.object_ids
+                    if identifier in valid_ids
+                )
+            )
+            if object_ids:
+                references.append(replace(reference, object_ids=object_ids))
+        return tuple(references)
 
     def _apply_evidence(
         self,

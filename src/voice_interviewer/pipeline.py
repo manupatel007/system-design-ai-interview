@@ -296,6 +296,13 @@ class InterviewSessionPipeline:
             await self._emit("interview.state", **result.state)
             if result.feedback:
                 await self._emit("interview.feedback", **result.feedback.to_dict())
+            if result.canvas_references:
+                await self._emit(
+                    "assistant.canvas.references",
+                    references=[
+                        reference.to_dict() for reference in result.canvas_references
+                    ],
+                )
             await self._emit("assistant.text.final", text=result.text)
             playback_ends_at: float | None = None
             chunk_count = 0

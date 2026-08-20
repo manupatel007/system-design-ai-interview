@@ -82,6 +82,11 @@ The canvas currently includes a browser-only simulated tutor interaction so the 
 
 Preview objects are deliberately excluded from semantic canvas snapshots, LLM context, canvas turn triggers, and rubric evidence. The control makes no model or network call and is not yet the production tutor-mode protocol.
 
+During a connected interview, grounded feedback is separate from that simulation. When the
+interviewer discusses exact diagram elements, numbered purple outlines appear on the canvas and
+matching transcript chips can refocus those areas later. Provider-supplied IDs are intersected
+with the latest accepted snapshot, and these temporary overlays never enter interview evidence.
+
 ## Rebuild the Canvas UI
 
 Runtime users do not need Node or internet access because the production bundle is checked in. After changing `frontend/`, rebuild and test it with:

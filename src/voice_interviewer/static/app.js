@@ -38,6 +38,7 @@ let interviewCompleted = false;
 const playbackSources = new Set();
 let playbackCursor = 0;
 let latestDiagramSnapshot = window.__diagramSnapshot ?? null;
+let pendingCanvasReferences = [];
 
 function setStatus(text, connected = false) {
   elements.status.textContent = text;
@@ -71,9 +72,11 @@ function resetTranscript() {
   elements.transcriptFeed.querySelectorAll(".transcript-entry").forEach((entry) => entry.remove());
   elements.transcriptEmpty.hidden = false;
   elements.feedback.hidden = true;
+  pendingCanvasReferences = [];
+  clearCanvasFeedback();
 }
 
-function appendTranscript(speaker, text) {
+function appendTranscript(speaker, text, references = []) {
   const normalizedText = String(text ?? "").trim();
   if (!normalizedText) return;
 
@@ -97,6 +100,26 @@ function appendTranscript(speaker, text) {
   const message = document.createElement("p");
   message.textContent = normalizedText;
   entry.append(header, message);
+  if (speaker === "interviewer" && references.length) {
+    const referenceList = document.createElement("div");
+    referenceList.className = "transcript-references";
+    referenceList.setAttribute("aria-label", "Referenced diagram areas");
+    for (const reference of references) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "transcript-reference";
+      button.textContent = `[${reference.displayIndex}] ${reference.label}`;
+      button.addEventListener("click", () => {
+        showCanvasFeedback(
+          [reference],
+          `transcript-${crypto.randomUUID()}`,
+          { focus: true, durationMs: 14_000 },
+        );
+      });
+      referenceList.append(button);
+    }
+    entry.append(referenceList);
+  }
   elements.transcriptFeed.append(entry);
 
   const entries = elements.transcriptFeed.querySelectorAll(".transcript-entry");
@@ -104,6 +127,37 @@ function appendTranscript(speaker, text) {
   requestAnimationFrame(() => {
     elements.transcriptScroll.scrollTop = elements.transcriptScroll.scrollHeight;
   });
+}
+
+function normalizeCanvasReferences(references) {
+  if (!Array.isArray(references)) return [];
+  return references.slice(0, 3).flatMap((reference, index) => {
+    const label = String(reference?.label ?? "").trim();
+    const objectIds = Array.isArray(reference?.objectIds)
+      ? reference.objectIds.filter((identifier) => typeof identifier === "string")
+      : [];
+    if (!label || !objectIds.length) return [];
+    return [{
+      kind: String(reference.kind ?? "issue"),
+      label,
+      objectIds,
+      displayIndex: index + 1,
+    }];
+  });
+}
+
+function showCanvasFeedback(
+  references,
+  feedbackId,
+  { focus = true, durationMs = 18_000 } = {},
+) {
+  window.dispatchEvent(new CustomEvent("diagram.feedback.show", {
+    detail: { references, feedbackId, focus, durationMs },
+  }));
+}
+
+function clearCanvasFeedback() {
+  window.dispatchEvent(new Event("diagram.feedback.clear"));
 }
 
 function connect() {
@@ -145,6 +199,8 @@ function connect() {
     const payload = event.payload ?? {};
 
     if (event.type === "candidate.speech.started") {
+      pendingCanvasReferences = [];
+      clearCanvasFeedback();
       setParticipantState(elements.candidateState, "Speaking", "active");
       setCardActive(elements.candidateCard, true);
     }
@@ -171,12 +227,22 @@ function connect() {
       setCardActive(elements.candidateCard, false);
     }
     if (event.type === "assistant.response.started") {
+      pendingCanvasReferences = [];
+      clearCanvasFeedback();
       setParticipantState(elements.interviewerState, "Thinking", "busy");
       setCardActive(elements.interviewerCard, true);
     }
+    if (event.type === "assistant.canvas.references") {
+      pendingCanvasReferences = normalizeCanvasReferences(payload.references);
+      showCanvasFeedback(pendingCanvasReferences, `feedback-${event.sequence}`, {
+        focus: true,
+        durationMs: 20_000,
+      });
+    }
     if (event.type === "assistant.text.final") {
       elements.interviewer.textContent = payload.text;
-      appendTranscript("interviewer", payload.text);
+      appendTranscript("interviewer", payload.text, pendingCanvasReferences);
+      pendingCanvasReferences = [];
     }
     if (event.type === "assistant.audio.chunk") {
       setParticipantState(elements.interviewerState, "Speaking", "active");
@@ -188,6 +254,7 @@ function connect() {
     }
     if (event.type === "assistant.interrupted") {
       stopPlayback();
+      clearCanvasFeedback();
       setParticipantState(elements.interviewerState, "Listening", "active");
       setCardActive(elements.interviewerCard, false);
     }
@@ -289,6 +356,8 @@ function resetConnection(status) {
   setCardActive(elements.candidateCard, false);
   setCardActive(elements.interviewerCard, false);
   stopPlayback();
+  pendingCanvasReferences = [];
+  clearCanvasFeedback();
 }
 
 function ensureAudioContext() {

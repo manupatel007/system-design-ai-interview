@@ -91,6 +91,27 @@ Geometry and visual styling remain available in session state but are omitted fr
 
 This keeps provider prompts small and makes diagram evidence auditable. Diagram labels and roles also enrich the local Whisper vocabulary prompt.
 
+## Grounded Interview Feedback
+
+The structured planner may attach up to three canvas references to a spoken response. Each
+reference contains:
+
+- `kind`: `issue`, `focus`, or `positive`.
+- A short diagnostic label.
+- One to eight existing semantic node or edge IDs.
+
+A single edge ID locates feedback such as an unlabelled relationship. Multiple node IDs define a
+temporary visual region for feedback about an absent concept, such as an unclear ownership or
+deployment boundary. The LLM never supplies coordinates.
+
+Before emission, the interview reducer intersects every proposed ID with the latest accepted
+snapshot. The browser resolves the surviving IDs against live Excalidraw geometry, draws numbered
+purple overlays, and can pan back to them from transcript chips.
+
+Grounded feedback overlays use `customData.aiPreview` and `customData.aiCanvasFeedback`. The scene
+normalizer excludes them, so they cannot reset the canvas quiet timer, re-enter provider context,
+or become rubric evidence. They are presentation-layer pointers rather than diagram mutations.
+
 ## Frontend Development
 
 Requirements:
@@ -108,6 +129,7 @@ The script performs a frozen install, runs the pure scene-normalizer tests, and 
 ## Tests
 
 - `frontend/src/diagram.test.js` covers labels, bindings, roles, groups, selection, fingerprints, and semantic deltas.
+- `frontend/src/canvas-feedback.test.js` covers multi-element regions, relationship outlines, target validation, and overlay cleanup.
 - `tests/test_diagram.py` covers validation, compact prompt projection, references, and duplicate IDs.
 - `tests/test_pipeline_diagram.py` covers WebSocket control handling, synchronization, STT glossary enrichment, and invalid scene errors.
 - `tests/test_server.py` confirms the built Excalidraw bundle and `canvas.synced` path are served end to end.
