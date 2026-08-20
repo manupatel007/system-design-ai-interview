@@ -227,19 +227,21 @@ function DiagramEditor() {
   const acceptSuggestion = useCallback(() => {
     const instance = api.current;
     if (!instance || !activeProposal) return;
+    const nextElements = acceptAiProposal(
+      instance.getSceneElements(),
+      activeProposal.proposalId,
+    );
     instance.updateScene({
-      elements: acceptAiProposal(
-        instance.getSceneElements(),
-        activeProposal.proposalId,
-      ),
+      elements: nextElements,
       captureUpdate: CaptureUpdateAction.NEVER,
     });
+    publish(nextElements, instance.getAppState());
     setAcceptedProposalIds((identifiers) => [
       ...identifiers,
       activeProposal.proposalId,
     ]);
     setActiveProposal(null);
-  }, [activeProposal]);
+  }, [activeProposal, publish]);
 
   const rejectSuggestion = useCallback(() => {
     const instance = api.current;
@@ -258,12 +260,17 @@ function DiagramEditor() {
     const instance = api.current;
     const proposalId = acceptedProposalIds.at(-1);
     if (!instance || !proposalId) return;
+    const nextElements = removeAiProposal(
+      instance.getSceneElements(),
+      proposalId,
+    );
     instance.updateScene({
-      elements: removeAiProposal(instance.getSceneElements(), proposalId),
+      elements: nextElements,
       captureUpdate: CaptureUpdateAction.NEVER,
     });
+    publish(nextElements, instance.getAppState());
     setAcceptedProposalIds((identifiers) => identifiers.slice(0, -1));
-  }, [acceptedProposalIds]);
+  }, [acceptedProposalIds, publish]);
 
   return (
     <Excalidraw

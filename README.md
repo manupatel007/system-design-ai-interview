@@ -81,10 +81,12 @@ labelled relationships, or a complete reference architecture without overwriting
 3. Review the purple ghost objects and the explanation in the **AI canvas** panel.
 4. Choose **Keep suggestion / Keep reference** or **Reject**. Kept AI objects remain editable.
 
-Proposal objects carry `aiPreview` metadata and are excluded from semantic snapshots, candidate
-evidence, and rubric scoring. The reducer validates IDs, limits size, and only permits proposals
-when the candidate explicitly asks for help. Grounded feedback remains separate: numbered purple
-outlines identify exact existing nodes or edges when the interviewer explains a diagram issue.
+Proposed objects carry `aiPreview` metadata and remain outside the semantic snapshot until the
+candidate chooses **Keep**. Kept objects enter a separate `assistantLayer`, so later help can build
+on earlier AI suggestions while candidate-authored nodes and edges remain the only diagram objects
+eligible for evidence. The reducer validates IDs, limits size, and only permits proposals when the
+candidate explicitly asks for help. Grounded feedback remains separate: numbered purple outlines
+identify exact existing nodes or edges when the interviewer explains a diagram issue.
 
 ### Ask for Scoped Help
 

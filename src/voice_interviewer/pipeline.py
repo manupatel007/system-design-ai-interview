@@ -134,6 +134,8 @@ class InterviewSessionPipeline:
                 revision=snapshot.revision,
                 nodeCount=len(snapshot.nodes),
                 edgeCount=len(snapshot.edges),
+                assistantNodeCount=len(snapshot.assistant_nodes),
+                assistantEdgeCount=len(snapshot.assistant_edges),
                 selectedObjectIds=list(snapshot.selected_object_ids),
             )
             self._schedule_response()

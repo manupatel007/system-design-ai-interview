@@ -145,9 +145,10 @@ selects the assistance level, applies hard node/edge limits, validates reference
 proposal separately from spoken text. Neither proposal type advances the phase or creates evidence.
 
 The frontend shows proposals as reversible ghost layouts. **Keep** adds editable AI-authored
-objects for visual comparison; **Reject** removes them. Both paths preserve candidate-authored
-objects. AI-authored objects are tagged and filtered from semantic snapshots, so a candidate cannot
-accidentally receive rubric credit for accepting a reference design.
+objects to the snapshot's separate assistant layer; **Reject** removes them. Future help turns see
+the union of candidate and accepted-assistant objects and may connect a new proposal to either
+layer. Evidence validation still intersects provider-supplied IDs with candidate-authored objects
+only, so accepting or editing a reference design cannot create rubric credit.
 
 ## Evidence and Rubric Policy
 

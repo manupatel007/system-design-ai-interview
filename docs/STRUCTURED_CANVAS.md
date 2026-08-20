@@ -25,6 +25,7 @@ Each snapshot contains:
 - `nodes`: identifier, Excalidraw shape, inferred system-design role, bound label, geometry, and group IDs.
 - `edges`: identifier, arrow/line shape, bound label, source and target bindings, and group IDs.
 - `groups`: group identifier and normalized member identifiers.
+- `assistantLayer`: kept AI-authored nodes and edges, available as context but not evidence.
 - `selectedObjectIds`: selected semantic node or edge identifiers.
 - `delta`: added, updated, and removed identifiers plus a human-readable semantic summary.
 - `revision`: monotonically increasing client scene revision.
@@ -39,11 +40,12 @@ anchored to the current selection or active question; `reference` proposals prov
 non-authoritative architecture skeleton for comparison.
 
 The frontend converts these records into purple ghost Excalidraw elements and presents Keep and
-Reject actions. Proposal elements are intentionally tagged with `customData.aiPreview=true` and
-remain outside the normalizer output even after Keep, so they cannot contaminate candidate evidence
-or trigger another interview turn. This separation lets a candidate copy, edit, or redraw a useful
-idea while preserving an auditable distinction between candidate reasoning and model reference
-material.
+Reject actions. Proposed, rejected, and feedback-overlay elements stay outside the normalizer.
+Kept proposal components and connectors are normalized into `assistantLayer.nodes` and
+`assistantLayer.edges`; their stable scene IDs let a later proposal connect to them. Candidate
+objects remain in the top-level `nodes` and `edges` arrays, and candidate deltas ignore assistant
+changes. The provider may reason over both layers, while evidence and rubric validation use only
+the candidate layer.
 
 ## Role Inference
 

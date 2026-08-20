@@ -51,6 +51,50 @@ test("builds a scoped structured proposal beside the selected component", () => 
   assert.ok(proposal.skeletons.every(isAiPreviewElement));
 });
 
+test("builds a new proposal from an accepted AI component", () => {
+  const acceptedLoadBalancer = {
+    ...component("ai-load-balancer", 260, 40),
+    customData: {
+      author: "ai",
+      aiPreview: true,
+      aiPreviewKind: "component",
+      aiPreviewStatus: "accepted",
+      label: "Load Balancer",
+    },
+  };
+  const proposal = buildStructuredAiProposal(
+    [component("client", 20, 40), acceptedLoadBalancer],
+    {
+      kind: "scoped",
+      title: "Continue the request path",
+      nodes: [
+        { id: "api", label: "API Service", role: "service", layer: 1 },
+      ],
+      edges: [
+        {
+          id: "lb-api",
+          label: "route",
+          sourceId: "ai-load-balancer",
+          targetId: "api",
+        },
+      ],
+    },
+    ["ai-load-balancer"],
+    { centerX: 400, centerY: 300 },
+    "proposal-follow-up",
+  );
+
+  const proposedNode = proposal.skeletons.find(
+    (element) => element.customData.aiProposalEntityId === "api",
+  );
+  const connector = proposal.skeletons.find(
+    (element) => element.customData.aiProposalEntityId === "lb-api",
+  );
+  assert.deepEqual(proposal.anchorIds, ["ai-load-balancer"]);
+  assert.equal(connector.customData.aiSourceId, "ai-load-balancer");
+  assert.equal(connector.customData.aiTargetId, proposedNode.id);
+});
+
 test("lays out a reference architecture in semantic layers", () => {
   const proposal = buildStructuredAiProposal(
     [component("candidate-api", 0, 0)],

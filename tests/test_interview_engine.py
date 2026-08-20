@@ -496,6 +496,132 @@ async def test_scoped_draw_request_filters_and_bounds_provider_proposal() -> Non
 
 
 @pytest.mark.asyncio
+async def test_mock_canvas_help_builds_on_kept_ai_component() -> None:
+    engine = StructuredInterviewEngine(MockInterviewLLM())
+    engine.configure("Design a URL shortener", "adaptive")
+    await engine.start(_context())
+
+    first = await engine.respond(
+        _context(
+            "What should I draw here?",
+            diagram=_client_only_diagram(),
+            selected_object_ids=("client",),
+        )
+    )
+    second = await engine.respond(
+        _context(
+            "What should I draw next?",
+            diagram=_diagram_with_assistant(),
+            selected_object_ids=("ai-lb",),
+        )
+    )
+
+    assert first.canvas_proposal is not None
+    assert first.canvas_proposal.nodes[0].role is CanvasProposalNodeRole.LOAD_BALANCER
+    assert second.canvas_proposal is not None
+    assert second.canvas_proposal.nodes[0].role is CanvasProposalNodeRole.SERVICE
+    assert second.canvas_proposal.edges[0].source_id == "ai-lb"
+
+
+@pytest.mark.asyncio
+async def test_scoped_draw_request_can_extend_accepted_ai_layer() -> None:
+    proposal = CanvasProposal(
+        kind=CanvasProposalKind.SCOPED,
+        title="Continue the request path",
+        nodes=(
+            CanvasProposalNode(
+                "suggested-api",
+                "Application Service",
+                CanvasProposalNodeRole.SERVICE,
+                1,
+            ),
+        ),
+        edges=(
+            CanvasProposalEdge(
+                "lb-api",
+                "route",
+                "ai-lb",
+                "suggested-api",
+            ),
+        ),
+    )
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            _plan(
+                utterance="The request path can continue from the load balancer.",
+                canvas_proposal=proposal,
+            ),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener", "adaptive")
+    await engine.start(_context())
+
+    result = await engine.respond(
+        _context(
+            "What should I draw next?",
+            diagram=_diagram_with_assistant(),
+            selected_object_ids=("ai-lb",),
+        )
+    )
+
+    assert result.assistance is not None
+    assert result.assistance.object_ids == ("ai-lb",)
+    assert result.canvas_proposal is not None
+    assert result.canvas_proposal.edges[0].source_id == "ai-lb"
+    assert planner.contexts[1].diagram is not None
+    assert planner.contexts[1].diagram.prompt_dict()["assistantLayer"]["nodes"][0][
+        "id"
+    ] == "ai-lb"
+
+
+@pytest.mark.asyncio
+async def test_accepted_ai_layer_cannot_become_candidate_evidence() -> None:
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            _plan(
+                utterance="Please explain your own architecture choices.",
+                evidence_updates=(
+                    EvidenceUpdate(
+                        Competency.ARCHITECTURE_FLOW,
+                        "A load balancer is visible.",
+                        EvidenceSource.DIAGRAM,
+                        ("ai-lb",),
+                    ),
+                ),
+                rubric_updates=(
+                    RubricUpdate(
+                        Competency.ARCHITECTURE_FLOW,
+                        RubricLevel.SOME_EVIDENCE,
+                        "The architecture contains a load balancer.",
+                    ),
+                ),
+            ),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener")
+    await engine.start(_context())
+
+    result = await engine.respond(
+        _context(
+            "I am still thinking.",
+            diagram=_diagram_with_assistant(),
+        )
+    )
+
+    assert result.state["evidenceCount"] == 0
+    architecture = next(
+        entry
+        for entry in result.state["rubric"]
+        if entry["competency"] == "architecture_and_data_flow"
+    )
+    assert architecture["level"] == "not_observed"
+
+
+@pytest.mark.asyncio
 async def test_explicit_reference_request_returns_complete_mock_architecture() -> None:
     engine = StructuredInterviewEngine(MockInterviewLLM())
     engine.configure("Design a URL shortener", "strict")
@@ -717,6 +843,56 @@ def _diagram(*, edge_label: str = "lookup") -> DiagramSnapshot:
             },
         }
     )
+
+
+def _client_only_diagram() -> DiagramSnapshot:
+    return DiagramSnapshot.from_payload(
+        {
+            "version": 1,
+            "revision": 4,
+            "nodes": [_node("client", "client", "Client")],
+            "edges": [],
+            "groups": [],
+            "selectedObjectIds": ["client"],
+            "delta": {
+                "addedIds": ["client"],
+                "updatedIds": [],
+                "removedIds": [],
+                "summary": "Added Client",
+            },
+        }
+    )
+
+
+def _diagram_with_assistant() -> DiagramSnapshot:
+    payload = {
+        "version": 1,
+        "revision": 5,
+        "nodes": [_node("client", "client", "Client")],
+        "edges": [],
+        "groups": [],
+        "assistantLayer": {
+            "nodes": [_node("ai-lb", "load_balancer", "Load Balancer")],
+            "edges": [
+                {
+                    "id": "ai-client-lb",
+                    "shape": "arrow",
+                    "label": "HTTPS",
+                    "sourceId": "client",
+                    "targetId": "ai-lb",
+                    "groupIds": [],
+                }
+            ],
+        },
+        "selectedObjectIds": ["ai-lb"],
+        "delta": {
+            "addedIds": [],
+            "updatedIds": [],
+            "removedIds": [],
+            "summary": "",
+        },
+    }
+    return DiagramSnapshot.from_payload(payload)
 
 
 def _node(identifier: str, role: str, label: str) -> dict[str, object]:

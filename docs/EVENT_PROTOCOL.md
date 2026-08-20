@@ -103,6 +103,10 @@ Sent after a 350 ms scene-change debounce. This is the provider-independent sema
         "memberIds": ["api", "api-db", "db"]
       }
     ],
+    "assistantLayer": {
+      "nodes": [],
+      "edges": []
+    },
     "selectedObjectIds": ["api"],
     "delta": {
       "addedIds": ["api-db"],
@@ -114,7 +118,7 @@ Sent after a 350 ms scene-change debounce. This is the provider-independent sema
 }
 ```
 
-Bound text is folded into its node or edge and cannot appear in `selectedObjectIds`. The backend validates limits, supported versions, unique IDs, bindings, group membership, selection references, and delta references before replacing session state. Semantic edits reset the canvas quiet period; selection-only snapshots do not.
+Bound text is folded into its node or edge and cannot appear in `selectedObjectIds`. The backend validates limits, supported versions, unique IDs, bindings, group membership, selection references, and delta references before replacing session state. Candidate semantic edits reset the canvas quiet period; selection-only and assistant-only snapshots do not.
 
 The server answers accepted snapshots with:
 
@@ -125,6 +129,8 @@ The server answers accepted snapshots with:
     "revision": 7,
     "nodeCount": 2,
     "edgeCount": 1,
+    "assistantNodeCount": 0,
+    "assistantEdgeCount": 0,
     "selectedObjectIds": ["api"]
   }
 }
@@ -244,11 +250,12 @@ non-evidentiary and additive. The reducer validates every proposal against the a
 filters unknown IDs, bounds node/edge counts, and drops malformed proposals rather than mutating
 candidate content.
 
-The browser renders proposals as purple ghost objects with a Keep/Reject decision. Keeping a
-proposal makes its objects editable but retains `customData.aiPreview=true`; therefore they remain
-excluded from future semantic snapshots, provider context, canvas quiet-time triggers, and rubric
-evidence. Reject removes the proposal. This keeps model-authored reference material visibly
-separate from candidate-authored design.
+The browser renders proposals as purple ghost objects with a Keep/Reject decision. Reject removes
+the proposal without changing diagram context. Keep makes its objects editable and publishes them
+under `canvas.snapshot.payload.assistantLayer`. Later model turns may reference those exact node
+IDs and extend the accepted AI graph. Candidate nodes and edges remain at the snapshot top level;
+only those top-level objects can become diagram evidence. Assistant-layer changes synchronize
+without creating candidate canvas activity or advancing the interview turn gate.
 
 ## Interview State Events
 

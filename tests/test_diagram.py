@@ -31,6 +31,7 @@ def test_snapshot_validates_and_compacts_scene() -> None:
             {"id": "api-db", "shape": "arrow", "from": "api", "to": "db", "label": "SQL"}
         ],
         "groups": [{"id": "backend", "members": ["api", "db", "api-db"]}],
+        "assistantLayer": {"nodes": [], "edges": []},
         "selectedObjectIds": ["db"],
     }
     assert snapshot.glossary_terms()[:2] == ("PostgreSQL", "database")
@@ -46,6 +47,118 @@ def test_interviewer_context_contains_compact_diagram() -> None:
     assert payload["diagramSnapshot"] == snapshot.prompt_dict()
     assert "x" not in payload["diagramSnapshot"]["nodes"][0]
     assert payload["diagramSnapshot"]["edges"][0]["from"] == "api"
+
+
+def test_snapshot_separates_accepted_assistant_layer() -> None:
+    payload = _snapshot_payload()
+    payload["assistantLayer"] = {
+        "nodes": [
+            {
+                "id": "ai-lb",
+                "shape": "rectangle",
+                "role": "load_balancer",
+                "label": "Load Balancer",
+                "x": 560,
+                "y": 40,
+                "width": 180,
+                "height": 80,
+                "groupIds": [],
+            }
+        ],
+        "edges": [
+            {
+                "id": "ai-api-lb",
+                "shape": "arrow",
+                "label": "HTTPS",
+                "sourceId": "api",
+                "targetId": "ai-lb",
+                "groupIds": [],
+            }
+        ],
+    }
+    payload["selectedObjectIds"] = ["ai-lb"]
+
+    snapshot = DiagramSnapshot.from_payload(payload)
+
+    assert [node.id for node in snapshot.nodes] == ["api", "db"]
+    assert [node.id for node in snapshot.assistant_nodes] == ["ai-lb"]
+    assert snapshot.all_object_ids == {
+        "api",
+        "db",
+        "api-db",
+        "ai-lb",
+        "ai-api-lb",
+    }
+    assert snapshot.candidate_object_ids == {"api", "db", "api-db"}
+    assert snapshot.prompt_dict()["assistantLayer"] == {
+        "nodes": [
+            {
+                "id": "ai-lb",
+                "role": "load_balancer",
+                "shape": "rectangle",
+                "label": "Load Balancer",
+            }
+        ],
+        "edges": [
+            {
+                "id": "ai-api-lb",
+                "shape": "arrow",
+                "from": "api",
+                "to": "ai-lb",
+                "label": "HTTPS",
+            }
+        ],
+    }
+    assert "Load Balancer" in snapshot.glossary_terms()
+
+
+def test_candidate_edge_may_connect_to_accepted_assistant_node() -> None:
+    payload = _snapshot_payload()
+    payload["assistantLayer"] = {
+        "nodes": [
+            {
+                "id": "ai-lb",
+                "shape": "rectangle",
+                "role": "load_balancer",
+                "label": "Load Balancer",
+                "x": 560,
+                "y": 40,
+                "width": 180,
+                "height": 80,
+                "groupIds": [],
+            }
+        ],
+        "edges": [],
+    }
+    payload["edges"][0]["targetId"] = "ai-lb"
+
+    snapshot = DiagramSnapshot.from_payload(payload)
+
+    assert snapshot.edges[0].target_id == "ai-lb"
+
+
+def test_candidate_delta_cannot_claim_assistant_entity() -> None:
+    payload = _snapshot_payload()
+    payload["assistantLayer"] = {
+        "nodes": [
+            {
+                "id": "ai-lb",
+                "shape": "rectangle",
+                "role": "load_balancer",
+                "label": "Load Balancer",
+                "x": 560,
+                "y": 40,
+                "width": 180,
+                "height": 80,
+                "groupIds": [],
+            }
+        ],
+        "edges": [],
+    }
+    payload["delta"]["addedIds"] = ["ai-lb"]
+
+    with pytest.raises(DiagramValidationError, match="unknown current entity"):
+        DiagramSnapshot.from_payload(payload)
 
 
 def test_snapshot_rejects_unknown_edge_endpoint() -> None:

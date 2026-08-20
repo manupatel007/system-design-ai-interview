@@ -258,7 +258,7 @@ class MockInterviewLLM:
         max_nodes: int,
         max_edges: int,
     ) -> CanvasProposal:
-        diagram_nodes = context.diagram.nodes if context.diagram else ()
+        diagram_nodes = context.diagram.all_nodes if context.diagram else ()
         existing_ids = {node.id for node in diagram_nodes}
         raw_anchors = request.get("anchorObjectIds")
         anchor_ids = tuple(
@@ -284,6 +284,16 @@ class MockInterviewLLM:
             )
         existing_roles = {node.role for node in diagram_nodes}
         choices = (
+            (
+                CanvasProposalNodeRole.LOAD_BALANCER,
+                "Load Balancer",
+                "HTTPS",
+            ),
+            (
+                CanvasProposalNodeRole.SERVICE,
+                "Application Service",
+                "route",
+            ),
             (
                 CanvasProposalNodeRole.CACHE,
                 "Read Cache",
@@ -332,7 +342,9 @@ class MockInterviewLLM:
             ),
         ) if max_nodes else ()
         anchor_id = anchor_ids[0] if anchor_ids else (
-            diagram_nodes[0].id if diagram_nodes else None
+            context.diagram.assistant_nodes[-1].id
+            if context.diagram and context.diagram.assistant_nodes
+            else (diagram_nodes[0].id if diagram_nodes else None)
         )
         edges = (
             (

@@ -1,4 +1,5 @@
 const COMPONENT_TYPES = new Set(["rectangle", "ellipse", "diamond"]);
+const ASSISTANT_ENTITY_KINDS = new Set(["component", "connector"]);
 const PROPOSAL_KINDS = new Set(["scoped", "reference_architecture"]);
 const AI_STROKE = "#a855f7";
 const AI_FILL = "#e9d5ff";
@@ -67,11 +68,16 @@ export function buildStructuredAiProposal(
   const visibleScene = elements.filter(
     (element) => !element.isDeleted && !element.customData?.aiCanvasFeedback,
   );
-  const candidateElements = visibleScene.filter(
-    (element) => !isAiPreviewElement(element),
+  const anchorableElements = visibleScene.filter(
+    (element) =>
+      !isAiPreviewElement(element) ||
+      (
+        element.customData?.aiPreviewStatus === "accepted" &&
+        ASSISTANT_ENTITY_KINDS.has(element.customData?.aiPreviewKind)
+      ),
   );
   const elementsById = new Map(
-    candidateElements.map((element) => [element.id, element]),
+    anchorableElements.map((element) => [element.id, element]),
   );
   const anchorIds = [...new Set(anchorObjectIds ?? [])].filter((identifier) =>
     elementsById.has(identifier),
@@ -84,11 +90,19 @@ export function buildStructuredAiProposal(
     viewport,
     proposal.kind,
   );
+  const proposalNodeSceneIds = new Map(
+    proposal.nodes.map((node) => [
+      node.id,
+      proposalElementId(proposalId, "node", node.id),
+    ]),
+  );
   const conceptBounds = new Map(
-    candidateElements.map((element) => [element.id, elementBounds(element)]),
+    anchorableElements
+      .filter(isSemanticNodeElement)
+      .map((element) => [element.id, elementBounds(element)]),
   );
   const nodeSkeletons = nodeLayouts.map((layout) => {
-    const id = proposalElementId(proposalId, "node", layout.node.id);
+    const id = proposalNodeSceneIds.get(layout.node.id);
     const skeleton = proposalNode(layout, id, metadata);
     conceptBounds.set(layout.node.id, {
       x: skeleton.x,
@@ -129,6 +143,8 @@ export function buildStructuredAiProposal(
         ...metadata,
         aiPreviewKind: "connector",
         aiProposalEntityId: edge.id,
+        aiSourceId: proposalNodeSceneIds.get(edge.sourceId) ?? edge.sourceId,
+        aiTargetId: proposalNodeSceneIds.get(edge.targetId) ?? edge.targetId,
         label: edge.label,
       },
     };
@@ -355,6 +371,10 @@ function proposalNode(layout, id, metadata) {
       label: layout.node.label,
     },
   };
+}
+
+function isSemanticNodeElement(element) {
+  return !["arrow", "line", "text"].includes(element.type);
 }
 
 function shapeForRole(role) {

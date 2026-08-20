@@ -459,9 +459,14 @@ function stopPlayback() {
 }
 
 function renderDiagram(snapshot) {
+  const assistantNodes = snapshot.assistantLayer?.nodes?.length ?? 0;
+  const assistantEdges = snapshot.assistantLayer?.edges?.length ?? 0;
+  const assistant = assistantNodes || assistantEdges
+    ? ` · AI reference: ${assistantNodes} components, ${assistantEdges} relationships`
+    : "";
   const delta = snapshot.delta?.summary ? ` · ${snapshot.delta.summary}` : "";
   elements.diagramSummary.textContent =
-    `${snapshot.nodes.length} components · ${snapshot.edges.length} relationships${delta}`;
+    `${snapshot.nodes.length} candidate components · ${snapshot.edges.length} relationships${assistant}${delta}`;
 }
 
 function renderInterviewState(state) {

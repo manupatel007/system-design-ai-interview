@@ -1,9 +1,49 @@
 const CONNECTOR_TYPES = new Set(["arrow", "line"]);
+const ASSISTANT_ENTITY_KINDS = new Set(["component", "connector"]);
 
 export function normalizeScene(elements, appState = {}) {
-  const visible = elements.filter(
-    (element) => !element.isDeleted && element.customData?.aiPreview !== true,
+  const active = elements.filter((element) => !element.isDeleted);
+  const candidate = normalizeLayer(
+    active.filter((element) => element.customData?.aiPreview !== true),
   );
+  const assistantEntityIds = new Set(
+    active
+      .filter(isAcceptedAssistantEntity)
+      .map((element) => element.id),
+  );
+  const assistant = normalizeLayer(
+    active.filter(
+      (element) =>
+        assistantEntityIds.has(element.id) ||
+        (element.type === "text" &&
+          assistantEntityIds.has(element.containerId)),
+    ),
+    { includeGroups: false },
+  );
+  const semanticIds = new Set(
+    [
+      ...candidate.nodes,
+      ...candidate.edges,
+      ...assistant.nodes,
+      ...assistant.edges,
+    ].map((entity) => entity.id),
+  );
+  const selectedObjectIds = Object.keys(appState.selectedElementIds ?? {})
+    .filter((identifier) => semanticIds.has(identifier))
+    .sort();
+
+  return {
+    version: 1,
+    ...candidate,
+    assistantLayer: {
+      nodes: assistant.nodes,
+      edges: assistant.edges,
+    },
+    selectedObjectIds,
+  };
+}
+
+function normalizeLayer(visible, { includeGroups = true } = {}) {
   const boundText = new Map();
   for (const element of visible) {
     if (element.type === "text" && element.containerId) {
@@ -15,24 +55,26 @@ export function normalizeScene(elements, appState = {}) {
     .filter((element) => !CONNECTOR_TYPES.has(element.type))
     .filter((element) => element.type !== "text" || !element.containerId)
     .map((element) => normalizeNode(element, boundText))
+    .map((node) => (includeGroups ? node : { ...node, groupIds: [] }))
     .sort(byIdentifier);
   const edges = visible
     .filter((element) => CONNECTOR_TYPES.has(element.type))
     .map((element) => normalizeEdge(element, boundText))
+    .map((edge) => (includeGroups ? edge : { ...edge, groupIds: [] }))
     .sort(byIdentifier);
-  const groups = normalizeGroups([...nodes, ...edges]);
-  const semanticIds = new Set([...nodes, ...edges].map((entity) => entity.id));
-  const selectedObjectIds = Object.keys(appState.selectedElementIds ?? {})
-    .filter((identifier) => semanticIds.has(identifier))
-    .sort();
-
   return {
-    version: 1,
     nodes,
     edges,
-    groups,
-    selectedObjectIds,
+    groups: includeGroups ? normalizeGroups([...nodes, ...edges]) : [],
   };
+}
+
+function isAcceptedAssistantEntity(element) {
+  return (
+    element.customData?.aiPreview === true &&
+    element.customData?.aiPreviewStatus === "accepted" &&
+    ASSISTANT_ENTITY_KINDS.has(element.customData?.aiPreviewKind)
+  );
 }
 
 export function buildDelta(previous, current) {
@@ -65,14 +107,15 @@ export function sceneFingerprint(snapshot) {
     nodes: snapshot.nodes,
     edges: snapshot.edges,
     groups: snapshot.groups,
+    assistantLayer: snapshot.assistantLayer,
     selectedObjectIds: snapshot.selectedObjectIds,
   });
 }
 
 function normalizeNode(element, boundText) {
   const label = normalizeLabel(
-    element.customData?.label ??
-      boundText.get(element.id) ??
+    boundText.get(element.id) ??
+      element.customData?.label ??
       (element.type === "text" ? element.text ?? element.originalText : ""),
   );
   return {
@@ -92,9 +135,11 @@ function normalizeEdge(element, boundText) {
   return {
     id: element.id,
     shape: element.type,
-    label: normalizeLabel(element.customData?.label ?? boundText.get(element.id) ?? ""),
-    sourceId: element.startBinding?.elementId ?? null,
-    targetId: element.endBinding?.elementId ?? null,
+    label: normalizeLabel(boundText.get(element.id) ?? element.customData?.label ?? ""),
+    sourceId:
+      element.startBinding?.elementId ?? element.customData?.aiSourceId ?? null,
+    targetId:
+      element.endBinding?.elementId ?? element.customData?.aiTargetId ?? null,
     groupIds: [...new Set(element.groupIds ?? [])].sort(),
   };
 }

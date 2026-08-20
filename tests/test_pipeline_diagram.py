@@ -34,12 +34,79 @@ async def test_pipeline_accepts_structured_diagram_snapshot(mock_settings) -> No
         "revision": 3,
         "nodeCount": 2,
         "edgeCount": 1,
+        "assistantNodeCount": 0,
+        "assistantEdgeCount": 0,
         "selectedObjectIds": ["db"],
     }
     assert pipeline._client.diagram_snapshot is not None
     assert pipeline._client.recent_diagram_delta == "Connected API to database"
     assert "PostgreSQL" in (pipeline._stt_hotwords() or "")
     assert "System design interview" not in (pipeline._stt_hotwords() or "")
+    await pipeline.close()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_syncs_assistant_layer_without_candidate_activity(
+    mock_settings,
+) -> None:
+    events: list[dict[str, object]] = []
+
+    async def capture(event: dict[str, object]) -> None:
+        events.append(event)
+
+    pipeline = InterviewSessionPipeline(
+        session_id="assistant-diagram-session",
+        settings=mock_settings,
+        stt=MockSTT(),
+        llm=MockInterviewLLM(),
+        tts=ToneMockTTS(),
+        vad=EnergyVad(),
+        send_event=capture,
+    )
+    await pipeline.start()
+    payload = _snapshot()
+    payload["delta"] = {
+        "addedIds": [],
+        "updatedIds": [],
+        "removedIds": [],
+        "summary": "",
+    }
+    payload["assistantLayer"] = {
+        "nodes": [
+            {
+                "id": "ai-lb",
+                "shape": "rectangle",
+                "role": "load_balancer",
+                "label": "Load Balancer",
+                "x": 500,
+                "y": 0,
+                "width": 160,
+                "height": 80,
+                "groupIds": [],
+            }
+        ],
+        "edges": [
+            {
+                "id": "ai-api-lb",
+                "shape": "arrow",
+                "label": "HTTPS",
+                "sourceId": "api",
+                "targetId": "ai-lb",
+                "groupIds": [],
+            }
+        ],
+    }
+    payload["selectedObjectIds"] = ["ai-lb"]
+
+    await pipeline.handle_control({"type": "canvas.snapshot", "payload": payload})
+
+    synced = events[-1]
+    assert synced["payload"]["assistantNodeCount"] == 1
+    assert synced["payload"]["assistantEdgeCount"] == 1
+    assert pipeline._client.diagram_snapshot is not None
+    assert pipeline._client.diagram_snapshot.selected_object_ids == ("ai-lb",)
+    assert pipeline._client.recent_diagram_delta is None
+    assert pipeline._client.last_canvas_activity_at == 0.0
     await pipeline.close()
 
 

@@ -199,9 +199,6 @@ class InterviewState:
             "recentAssistance": [
                 item.to_dict() for item in self.assistance_history[-12:]
             ],
-            "recentCanvasProposals": [
-                item.to_dict() for item in self.canvas_proposals[-2:]
-            ],
             "currentQuestion": (
                 self.current_question.to_dict() if self.current_question else None
             ),

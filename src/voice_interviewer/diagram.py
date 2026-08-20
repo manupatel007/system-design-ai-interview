@@ -7,6 +7,8 @@ from typing import Any
 MAX_NODES = 250
 MAX_EDGES = 500
 MAX_GROUPS = 100
+MAX_ASSISTANT_NODES = 100
+MAX_ASSISTANT_EDGES = 180
 MAX_LABEL_LENGTH = 240
 MAX_IDENTIFIER_LENGTH = 120
 MAX_REFERENCES = MAX_NODES + MAX_EDGES + MAX_GROUPS
@@ -135,6 +137,8 @@ class DiagramSnapshot:
     nodes: tuple[DiagramNode, ...]
     edges: tuple[DiagramEdge, ...]
     groups: tuple[DiagramGroup, ...]
+    assistant_nodes: tuple[DiagramNode, ...]
+    assistant_edges: tuple[DiagramEdge, ...]
     selected_object_ids: tuple[str, ...]
     delta: DiagramDelta
 
@@ -156,18 +160,43 @@ class DiagramSnapshot:
             DiagramGroup.from_payload(item)
             for item in _bounded_list(values.get("groups"), "groups", MAX_GROUPS)
         )
+        assistant_values = (
+            {}
+            if values.get("assistantLayer") is None
+            else _object(values.get("assistantLayer"), "assistant layer")
+        )
+        assistant_nodes = tuple(
+            DiagramNode.from_payload(item)
+            for item in _bounded_list(
+                assistant_values.get("nodes"),
+                "assistant nodes",
+                MAX_ASSISTANT_NODES,
+            )
+        )
+        assistant_edges = tuple(
+            DiagramEdge.from_payload(item)
+            for item in _bounded_list(
+                assistant_values.get("edges"),
+                "assistant edges",
+                MAX_ASSISTANT_EDGES,
+            )
+        )
         object_ids = [node.id for node in nodes] + [edge.id for edge in edges]
-        current_ids = object_ids + [group.id for group in groups]
+        assistant_object_ids = [node.id for node in assistant_nodes] + [
+            edge.id for edge in assistant_edges
+        ]
+        current_ids = object_ids + assistant_object_ids + [group.id for group in groups]
         if len(current_ids) != len(set(current_ids)):
             raise DiagramValidationError("diagram entity ids must be unique")
-        node_ids = {node.id for node in nodes}
-        for edge in edges:
+        node_ids = {node.id for node in (*nodes, *assistant_nodes)}
+        for edge in (*edges, *assistant_edges):
             for endpoint in (edge.source_id, edge.target_id):
                 if endpoint and endpoint not in node_ids:
                     raise DiagramValidationError(
                         f"edge {edge.id} references unknown node {endpoint}"
                     )
         object_id_set = set(object_ids)
+        all_object_id_set = object_id_set | set(assistant_object_ids)
         group_id_set = {group.id for group in groups}
         group_memberships: set[tuple[str, str]] = set()
         for group in groups:
@@ -190,15 +219,15 @@ class DiagramSnapshot:
         selected_object_ids = _identifiers(
             values.get("selectedObjectIds"),
             "selected object ids",
-            maximum=MAX_NODES + MAX_EDGES,
+            maximum=MAX_NODES + MAX_EDGES + MAX_ASSISTANT_NODES + MAX_ASSISTANT_EDGES,
         )
-        unknown_selections = set(selected_object_ids) - object_id_set
+        unknown_selections = set(selected_object_ids) - all_object_id_set
         if unknown_selections:
             raise DiagramValidationError(
                 f"selection references unknown object {sorted(unknown_selections)[0]}"
             )
         delta = DiagramDelta.from_payload(values.get("delta"))
-        current_id_set = set(current_ids)
+        current_id_set = set(object_ids + [group.id for group in groups])
         for identifier in (*delta.added_ids, *delta.updated_ids):
             if identifier not in current_id_set:
                 raise DiagramValidationError(
@@ -215,9 +244,27 @@ class DiagramSnapshot:
             nodes=nodes,
             edges=edges,
             groups=groups,
+            assistant_nodes=assistant_nodes,
+            assistant_edges=assistant_edges,
             selected_object_ids=selected_object_ids,
             delta=delta,
         )
+
+    @property
+    def all_nodes(self) -> tuple[DiagramNode, ...]:
+        return (*self.nodes, *self.assistant_nodes)
+
+    @property
+    def all_edges(self) -> tuple[DiagramEdge, ...]:
+        return (*self.edges, *self.assistant_edges)
+
+    @property
+    def all_object_ids(self) -> frozenset[str]:
+        return frozenset(item.id for item in (*self.all_nodes, *self.all_edges))
+
+    @property
+    def candidate_object_ids(self) -> frozenset[str]:
+        return frozenset(item.id for item in (*self.nodes, *self.edges))
 
     def prompt_dict(self) -> dict[str, object]:
         return {
@@ -227,12 +274,16 @@ class DiagramSnapshot:
             "groups": [
                 {"id": group.id, "members": list(group.member_ids)} for group in self.groups
             ],
+            "assistantLayer": {
+                "nodes": [node.prompt_item() for node in self.assistant_nodes],
+                "edges": [edge.prompt_item() for edge in self.assistant_edges],
+            },
             "selectedObjectIds": list(self.selected_object_ids),
         }
 
     def glossary_terms(self) -> tuple[str, ...]:
         selected = set(self.selected_object_ids)
-        ordered_nodes = sorted(self.nodes, key=lambda node: node.id not in selected)
+        ordered_nodes = sorted(self.all_nodes, key=lambda node: node.id not in selected)
         terms: list[str] = []
         for node in ordered_nodes:
             if node.label:

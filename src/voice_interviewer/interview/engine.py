@@ -297,7 +297,7 @@ class StructuredInterviewEngine:
         if context.diagram is None:
             return ()
         valid_ids = {
-            item.id for item in (*context.diagram.nodes, *context.diagram.edges)
+            item.id for item in (*context.diagram.all_nodes, *context.diagram.all_edges)
         }
         selected_ids = (
             context.selected_object_ids or context.diagram.selected_object_ids
@@ -414,7 +414,7 @@ class StructuredInterviewEngine:
         if requested_kind is CanvasProposalKind.NONE or proposal.is_empty:
             return None
         existing_node_ids = (
-            {node.id for node in context.diagram.nodes}
+            {node.id for node in context.diagram.all_nodes}
             if context.diagram is not None
             else set()
         )
@@ -448,7 +448,7 @@ class StructuredInterviewEngine:
         if context.diagram is None:
             return ()
         valid_ids = {
-            item.id for item in (*context.diagram.nodes, *context.diagram.edges)
+            item.id for item in (*context.diagram.all_nodes, *context.diagram.all_edges)
         }
         references: list[CanvasReference] = []
         for reference in plan.canvas_references[:3]:
@@ -587,14 +587,14 @@ class StructuredInterviewEngine:
         return self.state.phase_turns >= 3
 
     def _diagram_visibility_plan(self, context: InterviewContext) -> InterviewTurnPlan:
-        if not context.diagram or not context.diagram.nodes:
+        if not context.diagram or not context.diagram.all_nodes:
             statement = (
                 "I can see the canvas, but it does not contain any labeled components yet."
             )
         else:
             names = [
                 (node.label or node.role.replace("_", " "))[:60]
-                for node in context.diagram.nodes
+                for node in context.diagram.all_nodes
             ]
             visible = ", ".join(names[:4])
             relation = self._first_relation(context)
@@ -613,9 +613,9 @@ class StructuredInterviewEngine:
             return ""
         names = {
             node.id: (node.label or node.role.replace("_", " "))[:60]
-            for node in context.diagram.nodes
+            for node in context.diagram.all_nodes
         }
-        for edge in context.diagram.edges:
+        for edge in context.diagram.all_edges:
             if edge.source_id in names and edge.target_id in names:
                 return f"{names[edge.source_id]} connected to {names[edge.target_id]}"
         return ""
