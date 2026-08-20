@@ -87,6 +87,22 @@ interviewer discusses exact diagram elements, numbered purple outlines appear on
 matching transcript chips can refocus those areas later. Provider-supplied IDs are intersected
 with the latest accepted snapshot, and these temporary overlays never enter interview evidence.
 
+### Ask for Scoped Help
+
+Choose a **Practice support** policy in **Interview setup** before joining:
+
+- **Strict** always returns a Socratic nudge.
+- **Adaptive** returns a nudge, then a concept, then a bounded example when help is repeated.
+- **Guided** starts with a concept and moves to a bounded example.
+
+Ask naturally with phrases such as "I need a hint", "Can you give me more help?", or "Show
+me an example." If canvas objects are selected, help is scoped to those objects and receives a
+matching purple focus outline. Otherwise it stays scoped to the active question. A transcript
+badge identifies each hint, concept, or worked example.
+
+Assistance does not close the question, advance the phase, increment the phase escape counter, or
+create candidate evidence. Selecting a different canvas area starts a fresh help sequence.
+
 ## Rebuild the Canvas UI
 
 Runtime users do not need Node or internet access because the production bundle is checked in. After changing `frontend/`, rebuild and test it with:

@@ -37,6 +37,7 @@ class InterviewContext:
     glossary: tuple[str, ...] = ()
     diagram: DiagramSnapshot | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    runtime_directive: dict[str, Any] = field(default_factory=dict)
     interview_state: dict[str, Any] = field(default_factory=dict)
     turn_mode: str = "candidate"
 

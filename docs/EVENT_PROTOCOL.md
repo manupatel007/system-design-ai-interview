@@ -44,10 +44,14 @@ Sent immediately after the WebSocket opens.
   "type": "session.configure",
   "payload": {
     "problem": "Design a URL shortener",
-    "glossary": ["Redis", "PostgreSQL", "base62", "p99"]
+    "glossary": ["Redis", "PostgreSQL", "base62", "p99"],
+    "assistancePolicy": "adaptive"
   }
 }
 ```
+
+`assistancePolicy` accepts `strict`, `adaptive`, or `guided`. Missing or unsupported values fall
+back to `adaptive`. The policy is fixed for that WebSocket session.
 
 ### `canvas.snapshot`
 
@@ -145,6 +149,35 @@ Requests evidence-backed completion. The browser stops and flushes the microphon
 }
 ```
 
+## Scoped Practice Assistance
+
+An explicit spoken help request runs the planner in `help` mode. Before the matching text event,
+the server emits the reducer-selected disclosure level:
+
+```json
+{
+  "type": "assistant.assistance",
+  "payload": {
+    "policy": "adaptive",
+    "level": "concept",
+    "requestIndex": 2,
+    "scopeId": "q-4:api",
+    "topic": "high-level architecture",
+    "objectIds": ["api"]
+  }
+}
+```
+
+The reducer, not the provider, chooses `nudge`, `concept`, or `example`. Repeated requests deepen
+within the same active question and selected-object scope. Changing the question or selection
+starts a new scope. Strict policy always selects `nudge`; guided policy starts at `concept`.
+
+The provider supplies only the spoken explanation and optional grounded canvas references. The
+reducer forces `help_request`/`assist`, preserves the active question and phase, removes evidence,
+rubric, assumption, decision, and topic updates, and does not increment the phase-turn escape
+counter. Event order is `assistant.assistance`, optional `assistant.canvas.references`, then
+`assistant.text.final`.
+
 ## Grounded Canvas Feedback
 
 `assistant.canvas.references` is emitted immediately before the matching
@@ -190,6 +223,18 @@ interruption, timeout, or disconnect.
   "payload": {
     "phase": "high_level_design",
     "turnIndex": 3,
+    "assistancePolicy": "adaptive",
+    "assistanceCount": 1,
+    "recentAssistance": [
+      {
+        "policy": "adaptive",
+        "level": "nudge",
+        "requestIndex": 1,
+        "scopeId": "q-4:api",
+        "topic": "high-level architecture",
+        "objectIds": ["api"]
+      }
+    ],
     "currentQuestion": {
       "id": "q-4",
       "text": "What are the main components and request flow?",
@@ -249,7 +294,7 @@ Rubric levels are coverage markers (`not_observed`, `some_evidence`, or `demonst
 | Event | Important payload | Meaning |
 | --- | --- | --- |
 | `session.ready` | sample rate, encoding, active backends | Audio may be sent |
-| `session.configured` | none | Problem and glossary were accepted |
+| `session.configured` | none | Problem, glossary, and assistance policy were accepted |
 | `canvas.synced` | revision, node/edge counts, selection | Structured diagram state was accepted |
 | `interview.state` | phase, question, evidence, rubric | Authoritative conversation state changed |
 | `interview.feedback` | summary, strengths, improvements, not discussed | Interview completed with evidence-backed feedback |
@@ -258,6 +303,7 @@ Rubric levels are coverage markers (`not_observed`, `some_evidence`, or `demonst
 | `candidate.transcript.rejected` | reason, `durationMs` | No reliable speech decode was accepted; candidate may retry |
 | `candidate.transcript.final` | text, language, duration | Stable text available |
 | `assistant.response.started` | none | Turn gate yielded the floor |
+| `assistant.assistance` | policy, disclosure level, request index, scope, object IDs | Mark an explicit scoped-help response |
 | `assistant.canvas.references` | validated reference kind, label, and object IDs | Highlight exact areas discussed by the response |
 | `assistant.text.final` | `text` | Interviewer response text |
 | `assistant.audio.chunk` | audio, encoding, sample rate, channels, `chunkIndex` | Sequential playable PCM audio |

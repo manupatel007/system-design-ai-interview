@@ -8,6 +8,7 @@ from voice_interviewer.diagram import DiagramSnapshot
 from voice_interviewer.errors import LLMProviderError
 from voice_interviewer.interview.engine import StructuredInterviewEngine
 from voice_interviewer.interview.models import (
+    AssistanceLevel,
     CandidateIntent,
     CanvasReference,
     CanvasReferenceKind,
@@ -268,6 +269,140 @@ async def test_canvas_references_keep_only_current_diagram_ids() -> None:
     assert result.canvas_references[0].label == "Protocol is not labelled"
 
 
+@pytest.mark.asyncio
+async def test_adaptive_help_is_scoped_progressive_and_not_evidence() -> None:
+    unsafe_help_plan = _plan(
+        utterance="Start with one constraint. What would you try next?",
+        question_status=QuestionStatus.ANSWERED,
+        next_phase=InterviewPhase.ESTIMATION,
+        next_question=QuestionPlan(
+            "What scale should we support?",
+            "capacity estimation",
+            (Competency.CAPACITY_ESTIMATION,),
+        ),
+        evidence_updates=(
+            EvidenceUpdate(
+                Competency.REQUIREMENTS_SCOPE,
+                "Model-supplied help",
+                EvidenceSource.TRANSCRIPT,
+            ),
+        ),
+        rubric_updates=(
+            RubricUpdate(
+                Competency.REQUIREMENTS_SCOPE,
+                RubricLevel.DEMONSTRATED,
+                "Model supplied the reasoning.",
+            ),
+        ),
+        assumptions=("Assistant supplied this assumption",),
+        covered_topics=("assistant coaching",),
+    )
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            unsafe_help_plan,
+            _plan(utterance="Use one design principle. How would you apply it?"),
+            _plan(utterance="Try one bounded example. How would you adapt it?"),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener", "adaptive")
+    started = await engine.start(_context())
+    question_id = started.state["currentQuestion"]["id"]
+
+    first = await engine.respond(
+        _context(
+            "I need a hint.",
+            diagram=_diagram(),
+            selected_object_ids=("cache", "api"),
+        )
+    )
+    second = await engine.respond(
+        _context(
+            "Can you give me more help?",
+            diagram=_diagram(),
+            selected_object_ids=("api", "cache"),
+        )
+    )
+    new_scope = await engine.respond(
+        _context(
+            "Please help me with this part.",
+            diagram=_diagram(),
+            selected_object_ids=("db",),
+        )
+    )
+
+    assert first.assistance is not None
+    assert second.assistance is not None
+    assert new_scope.assistance is not None
+    assert first.assistance.level is AssistanceLevel.NUDGE
+    assert second.assistance.level is AssistanceLevel.CONCEPT
+    assert new_scope.assistance.level is AssistanceLevel.NUDGE
+    assert first.assistance.object_ids == ("api", "cache")
+    assert first.canvas_references[0].object_ids == ("api", "cache")
+    assert first.canvas_references[0].kind is CanvasReferenceKind.FOCUS
+    assert first.state["currentQuestion"]["id"] == question_id
+    assert second.state["currentQuestion"]["id"] == question_id
+    assert new_scope.state["phase"] == "requirements"
+    assert new_scope.state["evidenceCount"] == 0
+    assert new_scope.state["assumptions"] == []
+    assert engine.state.phase_turns == 0
+    assert engine.state.history[-1].intent is CandidateIntent.HELP_REQUEST
+    assert engine.state.history[-1].action is InterviewAction.ASSIST
+    assert [item["requestIndex"] for item in new_scope.state["recentAssistance"]] == [
+        1,
+        2,
+        1,
+    ]
+    first_help_context = planner.contexts[1]
+    assert first_help_context.turn_mode == "help"
+    assert first_help_context.runtime_directive["assistance"]["level"] == "nudge"
+    assert first_help_context.runtime_directive["assistance"]["objectIds"] == [
+        "api",
+        "cache",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("policy", "expected_levels"),
+    [
+        ("strict", (AssistanceLevel.NUDGE, AssistanceLevel.NUDGE)),
+        ("guided", (AssistanceLevel.CONCEPT, AssistanceLevel.EXAMPLE)),
+    ],
+)
+@pytest.mark.asyncio
+async def test_help_policy_controls_disclosure_depth(
+    policy: str,
+    expected_levels: tuple[AssistanceLevel, AssistanceLevel],
+) -> None:
+    engine = StructuredInterviewEngine(MockInterviewLLM())
+    engine.configure("Design a URL shortener", policy)
+    await engine.start(_context())
+
+    first = await engine.respond(
+        _context(
+            "I want some help.",
+            diagram=_diagram(),
+            selected_object_ids=("cache",),
+        )
+    )
+    second = await engine.respond(
+        _context(
+            "Can I have another hint?",
+            diagram=_diagram(),
+            selected_object_ids=("cache",),
+        )
+    )
+
+    assert first.assistance is not None
+    assert second.assistance is not None
+    assert (first.assistance.level, second.assistance.level) == expected_levels
+    assert first.canvas_references[0].object_ids == ("cache",)
+    assert first.canvas_references[0].kind is CanvasReferenceKind.FOCUS
+    assert first.state["assistancePolicy"] == policy
+    assert first.state["evidenceCount"] == 0
+
+
 def test_plan_rejects_multiple_spoken_questions() -> None:
     with pytest.raises(InterviewPlanValidationError, match="at most one question"):
         _plan(utterance="Why Redis? How will you invalidate it?")
@@ -313,9 +448,11 @@ class ScriptedLLM:
     def __init__(self, plans: list[InterviewTurnPlan]) -> None:
         self.plans = deque(plans)
         self.calls = 0
+        self.contexts: list[InterviewContext] = []
 
     async def plan(self, context: InterviewContext) -> InterviewTurnPlan:
         self.calls += 1
+        self.contexts.append(context)
         return self.plans.popleft()
 
     async def respond(self, context: InterviewContext) -> str:
@@ -337,13 +474,17 @@ class FailsAfterStartLLM:
 
 
 def _context(
-    transcript: str = "", *, diagram: DiagramSnapshot | None = None
+    transcript: str = "",
+    *,
+    diagram: DiagramSnapshot | None = None,
+    selected_object_ids: tuple[str, ...] = (),
 ) -> InterviewContext:
     return InterviewContext(
         session_id="interview-test",
         problem="Design a URL shortener",
         transcript=transcript,
         diagram=diagram,
+        selected_object_ids=selected_object_ids,
     )
 
 

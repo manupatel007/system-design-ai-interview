@@ -20,6 +20,7 @@ def test_health_and_static_client(mock_settings) -> None:
     assert "System Design Voice Interviewer" in index.text
     assert "excalidraw-root" in index.text
     assert "interview-phase" in index.text
+    assert "assistance-policy" in index.text
     assert "Finish interview" in index.text
     assert 'participant-grid' in index.text
     assert 'transcript-feed' in index.text
@@ -39,6 +40,7 @@ def test_websocket_configures_mock_session(mock_settings) -> None:
                     "payload": {
                         "problem": "Design a URL shortener",
                         "glossary": ["Redis", "PostgreSQL"],
+                        "assistancePolicy": "strict",
                     },
                 }
             )
@@ -49,6 +51,7 @@ def test_websocket_configures_mock_session(mock_settings) -> None:
     assert configured["type"] == "session.configured"
     assert interview_state["type"] == "interview.state"
     assert interview_state["payload"]["phase"] == "introduction"
+    assert interview_state["payload"]["assistancePolicy"] == "strict"
 
 
 def test_websocket_accepts_structured_canvas_snapshot(mock_settings) -> None:

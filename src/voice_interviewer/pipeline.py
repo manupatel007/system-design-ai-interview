@@ -101,7 +101,10 @@ class InterviewSessionPipeline:
         if event_type == "session.configure":
             self._client.problem = _optional_string(values.get("problem"))
             self._client.glossary = _string_list(values.get("glossary"))
-            interview_state = self._interview.configure(self._client.problem)
+            interview_state = self._interview.configure(
+                self._client.problem,
+                _optional_string(values.get("assistancePolicy")),
+            )
             await self._emit("session.configured")
             await self._emit("interview.state", **interview_state)
             self._schedule_interview_start()
@@ -296,6 +299,11 @@ class InterviewSessionPipeline:
             await self._emit("interview.state", **result.state)
             if result.feedback:
                 await self._emit("interview.feedback", **result.feedback.to_dict())
+            if result.assistance:
+                await self._emit(
+                    "assistant.assistance",
+                    **result.assistance.to_dict(),
+                )
             if result.canvas_references:
                 await self._emit(
                     "assistant.canvas.references",

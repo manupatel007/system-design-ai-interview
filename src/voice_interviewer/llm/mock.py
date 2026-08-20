@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from voice_interviewer.interview.models import (
+    AssistanceLevel,
     CandidateIntent,
     CanvasReference,
     CanvasReferenceKind,
@@ -63,6 +64,8 @@ class MockInterviewLLM:
             )
         if context.turn_mode == "finalize":
             return self._final_plan(context)
+        if context.turn_mode == "help":
+            return self._help_plan(context)
         if phase is InterviewPhase.INTRODUCTION:
             return self._plan(
                 utterance=(
@@ -90,6 +93,106 @@ class MockInterviewLLM:
         if phase is InterviewPhase.RELIABILITY_SCALE:
             return self._reliability_plan(context)
         return self._wrap_up_plan(context)
+
+    def _help_plan(self, context: InterviewContext) -> InterviewTurnPlan:
+        phase = self._phase(context)
+        directive = context.runtime_directive.get("assistance", {})
+        raw_level = (
+            directive.get("level", AssistanceLevel.NUDGE.value)
+            if isinstance(directive, dict)
+            else AssistanceLevel.NUDGE.value
+        )
+        try:
+            level = AssistanceLevel(str(raw_level))
+        except ValueError:
+            level = AssistanceLevel.NUDGE
+        topic = (
+            str(directive.get("topic", "")).strip()
+            if isinstance(directive, dict)
+            else ""
+        ) or phase.value.replace("_", " ")
+        focus = {
+            InterviewPhase.REQUIREMENTS: (
+                "separate one user-visible behavior from one measurable quality constraint"
+            ),
+            InterviewPhase.ESTIMATION: (
+                "turn one dominant volume into peak per-second load and storage"
+            ),
+            InterviewPhase.HIGH_LEVEL_DESIGN: (
+                "trace one request end to end and label every boundary it crosses"
+            ),
+            InterviewPhase.DEEP_DIVE: (
+                "tie the selected component to a workload property and a failure mode"
+            ),
+            InterviewPhase.RELIABILITY_SCALE: (
+                "name the first failure, its detection signal, and its recovery owner"
+            ),
+            InterviewPhase.WRAP_UP: (
+                "rank the largest remaining risk by impact and likelihood"
+            ),
+        }.get(
+            phase,
+            "state one design decision and the constraint that drives it",
+        )
+        examples = {
+            InterviewPhase.REQUIREMENTS: (
+                "For example, pair a redirect latency target with an availability target"
+            ),
+            InterviewPhase.ESTIMATION: (
+                "For example, convert ten million daily requests to average QPS, then add a "
+                "peak multiplier"
+            ),
+            InterviewPhase.HIGH_LEVEL_DESIGN: (
+                "For example, label Client to API as HTTPS and API to Cache as a key lookup"
+            ),
+            InterviewPhase.DEEP_DIVE: (
+                "For example, justify a cache with read dominance and define cache-miss behavior"
+            ),
+            InterviewPhase.RELIABILITY_SCALE: (
+                "For example, detect cache timeouts and define a bounded database fallback"
+            ),
+            InterviewPhase.WRAP_UP: (
+                "For example, prioritize removing a single-region stateful dependency"
+            ),
+        }
+        if level is AssistanceLevel.NUDGE:
+            utterance = f"Hint: {focus}. What would you add or change?"
+        elif level is AssistanceLevel.CONCEPT:
+            utterance = (
+                f"A useful method is to {focus}; this keeps the reasoning tied to a "
+                f"testable decision. How would you apply it to {topic}?"
+            )
+        else:
+            example = examples.get(
+                phase,
+                "For example, connect one constraint to one explicit design choice",
+            )
+            utterance = f"{example}. How would you adapt that pattern to {topic}?"
+        raw_object_ids = (
+            directive.get("objectIds", []) if isinstance(directive, dict) else []
+        )
+        object_ids = tuple(
+            item for item in raw_object_ids if isinstance(item, str)
+        )[:8]
+        references = (
+            (
+                CanvasReference(
+                    CanvasReferenceKind.FOCUS,
+                    f"{level.value.capitalize()} help requested here",
+                    object_ids,
+                ),
+            )
+            if object_ids
+            else ()
+        )
+        return self._plan(
+            utterance=utterance,
+            candidate_intent=CandidateIntent.HELP_REQUEST,
+            action=InterviewAction.ASSIST,
+            question_status=self._current_question_status(context),
+            next_phase=phase,
+            canvas_references=references,
+        )
 
     def _requirements_plan(self, context: InterviewContext) -> InterviewTurnPlan:
         transcript = context.transcript.lower()
@@ -521,6 +624,15 @@ class MockInterviewLLM:
             next_phase=InterviewPhase.COMPLETE,
             feedback=feedback,
         )
+
+    @staticmethod
+    def _current_question_status(context: InterviewContext) -> QuestionStatus:
+        question = context.interview_state.get("currentQuestion")
+        raw_status = question.get("status") if isinstance(question, dict) else None
+        try:
+            return QuestionStatus(str(raw_status))
+        except ValueError:
+            return QuestionStatus.NOT_APPLICABLE
 
     @staticmethod
     def _phase(context: InterviewContext) -> InterviewPhase:

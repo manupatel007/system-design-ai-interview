@@ -6,7 +6,7 @@ The interview must behave like one continuous conversation rather than a sequenc
 
 ```text
 final transcript + latest diagram
-  -> deterministic dialogue guards
+  -> deterministic dialogue and help-policy guards
   -> compact interview state
   -> structured provider plan
   -> phase and evidence policy
@@ -40,6 +40,7 @@ The bounded provider context contains:
 - Evidence ledger entries with source and supporting diagram object IDs.
 - Rubric coverage for nine competencies.
 - The last six conversation turns and last twelve evidence entries.
+- Assistance policy plus recent scoped help disclosures.
 - Phase history and completion state.
 
 The browser receives a slightly richer state projection with up to twenty recent evidence entries. Full audio is never included or persisted.
@@ -69,7 +70,7 @@ Every active question has:
 - Expected competency evidence.
 - `unanswered`, `partial`, `answered`, or `not_applicable` status.
 
-The provider must classify the candidate turn before selecting an action. Supported intents include answers, partial answers, clarification requests, meta-questions, diagram questions, drawing explanations, uncertainty, off-topic speech, and finish requests.
+The provider must classify the candidate turn before selecting an action. Supported intents include answers, partial answers, clarification requests, explicit help requests, meta-questions, diagram questions, drawing explanations, uncertainty, off-topic speech, and finish requests.
 
 The response policy requires:
 
@@ -78,6 +79,27 @@ The response policy requires:
 - No generic unrelated probe.
 - At most one question per spoken response.
 - An adjacent phase transition only after relevant evidence.
+
+## Scoped Progressive Assistance
+
+Practice support is configured per session:
+
+| Policy | First request | Repeated request |
+| --- | --- | --- |
+| `strict` | Nudge | Nudge |
+| `adaptive` | Nudge | Concept, then bounded example |
+| `guided` | Concept | Bounded example |
+
+Help is explicit rather than a separate tutor mode. The engine recognizes direct phrases such as
+"I need a hint", computes a scope from the active question and validated selected canvas IDs, and
+places a trusted assistance directive beside the untrusted interview evidence. The provider may
+explain only to the selected depth and may attach grounded focus references.
+
+The reducer then forces the turn to `help_request`/`assist`, keeps the current question and phase,
+and strips every evidence, rubric, assumption, decision, and covered-topic update. Help turns also
+do not increment `phaseTurns`, so repeated coaching cannot silently advance the interview. The
+history remains visible for reflection and final feedback, while only subsequent candidate
+reasoning can become evidence.
 
 ## Deterministic Conversation Repairs
 
@@ -100,7 +122,7 @@ The active technical question remains open instead of being replaced by a random
 
 Databricks Responses and Azure Foundry Chat Completions receive the same strict JSON Schema. Each plan contains:
 
-- Candidate intent, selected action, and current-question status.
+- Candidate intent, selected action, and current-question status, including explicit assistance.
 - Acknowledgement and final spoken utterance.
 - Evidence, rubric, assumption, decision, and covered-topic updates.
 - Requested next phase.
@@ -120,7 +142,7 @@ The live rubric tracks coverage, not a final numeric score:
 
 Nine competency dimensions cover requirements, estimation, API/data modeling, architecture, scalability, reliability, consistency, security/observability, and communication/trade-offs.
 
-Evidence is recorded as `transcript`, `diagram`, or `combined`. Diagram-only evidence may be retained for grounding, but it cannot upgrade rubric coverage. A cache rectangle is not proof that the candidate understands cache invalidation. Rubric updates require transcript or combined reasoning evidence, and levels can only move upward during the live interview.
+Evidence is recorded as `transcript`, `diagram`, or `combined`. Diagram-only evidence may be retained for grounding, but it cannot upgrade rubric coverage. A cache rectangle is not proof that the candidate understands cache invalidation. Rubric updates require transcript or combined reasoning evidence, and levels can only move upward during the live interview. Assistance turns are non-evidentiary even if a provider proposes updates.
 
 Final feedback separates:
 
@@ -145,9 +167,10 @@ The meeting-style UI keeps the current phase and active question on the intervie
 
 ## Bounds and Safety
 
-- Candidate transcript, diagram content, and state JSON are explicitly untrusted in the planner prompt.
+- Candidate transcript, diagram content, and evidence JSON are explicitly untrusted; only the server-created turn mode and runtime directive are trusted.
 - Diagram object IDs in evidence are intersected with the accepted snapshot.
 - Canvas feedback IDs are independently intersected with the accepted snapshot before emission.
+- Assistance scopes use validated selected IDs, and assisted content cannot create evidence.
 - Diagram-only evidence cannot change the rubric.
 - Phase transitions are adjacent and reducer-controlled.
 - Assumptions, decisions, topics, prompt history, labels, and plan arrays are bounded.
@@ -162,6 +185,7 @@ The test suite covers:
 - Irrelevant and partial answers retaining the current thread.
 - Diagram visibility questions bypassing the provider and preserving the question ID.
 - Grounded canvas references filtering invented IDs and preserving event order.
+- Scoped help escalation, policy differences, question preservation, and evidence isolation.
 - Assumption, decision, topic, evidence, and rubric updates.
 - Rejected phase skips.
 - Diagram-only evidence not upgrading a rubric.

@@ -7,6 +7,7 @@ const elements = {
   disconnect: document.querySelector("#disconnect"),
   problem: document.querySelector("#problem"),
   glossary: document.querySelector("#glossary"),
+  assistancePolicy: document.querySelector("#assistance-policy"),
   candidateCard: document.querySelector("#candidate-card"),
   interviewerCard: document.querySelector("#interviewer-card"),
   candidateState: document.querySelector("#candidate-state"),
@@ -39,6 +40,7 @@ const playbackSources = new Set();
 let playbackCursor = 0;
 let latestDiagramSnapshot = window.__diagramSnapshot ?? null;
 let pendingCanvasReferences = [];
+let pendingAssistance = null;
 
 function setStatus(text, connected = false) {
   elements.status.textContent = text;
@@ -59,6 +61,7 @@ function setCardActive(element, active) {
 function setSetupDisabled(disabled) {
   elements.problem.disabled = disabled;
   elements.glossary.disabled = disabled;
+  elements.assistancePolicy.disabled = disabled;
   if (disabled) elements.setup.open = false;
 }
 
@@ -73,10 +76,11 @@ function resetTranscript() {
   elements.transcriptEmpty.hidden = false;
   elements.feedback.hidden = true;
   pendingCanvasReferences = [];
+  pendingAssistance = null;
   clearCanvasFeedback();
 }
 
-function appendTranscript(speaker, text, references = []) {
+function appendTranscript(speaker, text, references = [], assistance = null) {
   const normalizedText = String(text ?? "").trim();
   if (!normalizedText) return;
 
@@ -100,6 +104,14 @@ function appendTranscript(speaker, text, references = []) {
   const message = document.createElement("p");
   message.textContent = normalizedText;
   entry.append(header, message);
+  if (speaker === "interviewer" && assistance) {
+    const badge = document.createElement("span");
+    badge.className = "transcript-assistance";
+    badge.dataset.level = assistance.level;
+    badge.textContent = assistance.label + " " + assistance.requestIndex;
+    badge.title = assistance.policy + " support for " + assistance.topic;
+    entry.append(badge);
+  }
   if (speaker === "interviewer" && references.length) {
     const referenceList = document.createElement("div");
     referenceList.className = "transcript-references";
@@ -127,6 +139,23 @@ function appendTranscript(speaker, text, references = []) {
   requestAnimationFrame(() => {
     elements.transcriptScroll.scrollTop = elements.transcriptScroll.scrollHeight;
   });
+}
+
+function normalizeAssistance(payload) {
+  const labels = {
+    nudge: "Hint",
+    concept: "Concept",
+    example: "Worked example",
+  };
+  const level = String(payload?.level ?? "");
+  if (!labels[level]) return null;
+  return {
+    level,
+    label: labels[level],
+    policy: String(payload.policy ?? "adaptive"),
+    requestIndex: Math.max(1, Number(payload.requestIndex) || 1),
+    topic: String(payload.topic ?? "current question"),
+  };
 }
 
 function normalizeCanvasReferences(references) {
@@ -189,6 +218,7 @@ function connect() {
     send("session.configure", {
       problem: elements.problem.value,
       glossary: elements.glossary.value.split(",").map((term) => term.trim()).filter(Boolean),
+      assistancePolicy: elements.assistancePolicy.value,
     });
     if (latestDiagramSnapshot) send("canvas.snapshot", latestDiagramSnapshot);
   });
@@ -200,6 +230,7 @@ function connect() {
 
     if (event.type === "candidate.speech.started") {
       pendingCanvasReferences = [];
+      pendingAssistance = null;
       clearCanvasFeedback();
       setParticipantState(elements.candidateState, "Speaking", "active");
       setCardActive(elements.candidateCard, true);
@@ -228,9 +259,20 @@ function connect() {
     }
     if (event.type === "assistant.response.started") {
       pendingCanvasReferences = [];
+      pendingAssistance = null;
       clearCanvasFeedback();
       setParticipantState(elements.interviewerState, "Thinking", "busy");
       setCardActive(elements.interviewerCard, true);
+    }
+    if (event.type === "assistant.assistance") {
+      pendingAssistance = normalizeAssistance(payload);
+      if (pendingAssistance) {
+        setParticipantState(
+          elements.interviewerState,
+          pendingAssistance.label,
+          "assist",
+        );
+      }
     }
     if (event.type === "assistant.canvas.references") {
       pendingCanvasReferences = normalizeCanvasReferences(payload.references);
@@ -241,8 +283,14 @@ function connect() {
     }
     if (event.type === "assistant.text.final") {
       elements.interviewer.textContent = payload.text;
-      appendTranscript("interviewer", payload.text, pendingCanvasReferences);
+      appendTranscript(
+        "interviewer",
+        payload.text,
+        pendingCanvasReferences,
+        pendingAssistance,
+      );
       pendingCanvasReferences = [];
+      pendingAssistance = null;
     }
     if (event.type === "assistant.audio.chunk") {
       setParticipantState(elements.interviewerState, "Speaking", "active");
@@ -357,6 +405,7 @@ function resetConnection(status) {
   setCardActive(elements.interviewerCard, false);
   stopPlayback();
   pendingCanvasReferences = [];
+  pendingAssistance = null;
   clearCanvasFeedback();
 }
 

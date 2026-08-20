@@ -39,6 +39,7 @@ class CandidateIntent(StrEnum):
     META_QUESTION = "meta_question"
     DIAGRAM_QUESTION = "diagram_question"
     DRAWING_EXPLANATION = "drawing_explanation"
+    HELP_REQUEST = "help_request"
     UNCERTAIN = "uncertain"
     OFF_TOPIC = "off_topic"
     FINISH_REQUEST = "finish_request"
@@ -49,8 +50,41 @@ class InterviewAction(StrEnum):
     PROBE = "probe"
     CLARIFY = "clarify"
     ANSWER_CANDIDATE = "answer_candidate"
+    ASSIST = "assist"
     TRANSITION = "transition"
     COMPLETE = "complete"
+
+
+class AssistancePolicy(StrEnum):
+    STRICT = "strict"
+    ADAPTIVE = "adaptive"
+    GUIDED = "guided"
+
+
+class AssistanceLevel(StrEnum):
+    NUDGE = "nudge"
+    CONCEPT = "concept"
+    EXAMPLE = "example"
+
+
+@dataclass(frozen=True, slots=True)
+class AssistanceTurn:
+    policy: AssistancePolicy
+    level: AssistanceLevel
+    request_index: int
+    scope_id: str
+    topic: str
+    object_ids: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "policy": self.policy.value,
+            "level": self.level.value,
+            "requestIndex": self.request_index,
+            "scopeId": self.scope_id,
+            "topic": self.topic,
+            "objectIds": list(self.object_ids),
+        }
 
 
 class QuestionStatus(StrEnum):

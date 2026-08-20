@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 
 from voice_interviewer.interview.models import (
     COMPETENCY_LABELS,
+    AssistanceLevel,
+    AssistancePolicy,
+    AssistanceTurn,
     CandidateIntent,
     Competency,
     DecisionUpdate,
@@ -102,6 +105,9 @@ def _rubric() -> dict[Competency, RubricEntry]:
 @dataclass(slots=True)
 class InterviewState:
     problem: str | None = None
+    assistance_policy: AssistancePolicy = AssistancePolicy.ADAPTIVE
+    assistance_history: list[AssistanceTurn] = field(default_factory=list)
+    _assistance_counts: dict[str, int] = field(default_factory=dict, repr=False)
     phase: InterviewPhase = InterviewPhase.INTRODUCTION
     turn_index: int = 0
     phase_turns: int = 0
@@ -118,11 +124,72 @@ class InterviewState:
     feedback: FeedbackPlan | None = None
     completed: bool = False
 
+    def preview_assistance(
+        self,
+        object_ids: tuple[str, ...] = (),
+    ) -> AssistanceTurn:
+        normalized_ids = tuple(sorted(dict.fromkeys(object_ids)))[:8]
+        scope_base = (
+            self.current_question.id if self.current_question else self.phase.value
+        )
+        scope_id = (
+            f"{scope_base}:{','.join(normalized_ids)}"
+            if normalized_ids
+            else scope_base
+        )
+        request_index = self._assistance_counts.get(scope_id, 0) + 1
+        topic = (
+            self.current_question.topic
+            if self.current_question
+            else self.phase.value.replace("_", " ")
+        )
+        return AssistanceTurn(
+            policy=self.assistance_policy,
+            level=self._assistance_level(request_index),
+            request_index=request_index,
+            scope_id=scope_id,
+            topic=topic,
+            object_ids=normalized_ids,
+        )
+
+    def record_assistance(self, assistance: AssistanceTurn) -> None:
+        self._assistance_counts[assistance.scope_id] = assistance.request_index
+        self.assistance_history.append(assistance)
+        if len(self.assistance_history) > 40:
+            del self.assistance_history[:-40]
+            active_scopes = {
+                item.scope_id for item in self.assistance_history
+            }
+            self._assistance_counts = {
+                scope_id: count
+                for scope_id, count in self._assistance_counts.items()
+                if scope_id in active_scopes
+            }
+
+    def _assistance_level(self, request_index: int) -> AssistanceLevel:
+        if self.assistance_policy is AssistancePolicy.STRICT:
+            return AssistanceLevel.NUDGE
+        if self.assistance_policy is AssistancePolicy.GUIDED:
+            return (
+                AssistanceLevel.CONCEPT
+                if request_index == 1
+                else AssistanceLevel.EXAMPLE
+            )
+        if request_index == 1:
+            return AssistanceLevel.NUDGE
+        if request_index == 2:
+            return AssistanceLevel.CONCEPT
+        return AssistanceLevel.EXAMPLE
+
     def prompt_dict(self) -> dict[str, object]:
         return {
             "phase": self.phase.value,
             "turnIndex": self.turn_index,
             "phaseTurns": self.phase_turns,
+            "assistancePolicy": self.assistance_policy.value,
+            "recentAssistance": [
+                item.to_dict() for item in self.assistance_history[-12:]
+            ],
             "currentQuestion": (
                 self.current_question.to_dict() if self.current_question else None
             ),
@@ -140,6 +207,11 @@ class InterviewState:
         return {
             "phase": self.phase.value,
             "turnIndex": self.turn_index,
+            "assistancePolicy": self.assistance_policy.value,
+            "assistanceCount": len(self.assistance_history),
+            "recentAssistance": [
+                item.to_dict() for item in self.assistance_history[-12:]
+            ],
             "currentQuestion": (
                 self.current_question.to_dict() if self.current_question else None
             ),

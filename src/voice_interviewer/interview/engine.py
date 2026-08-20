@@ -7,8 +7,11 @@ from voice_interviewer.interview.models import (
     COMPETENCY_LABELS,
     PHASE_SEQUENCE,
     RUBRIC_LEVEL_ORDER,
+    AssistancePolicy,
+    AssistanceTurn,
     CandidateIntent,
     CanvasReference,
+    CanvasReferenceKind,
     Competency,
     EvidenceSource,
     FeedbackPlan,
@@ -41,6 +44,19 @@ FINISH_PATTERN = re.compile(
     r"wrap (?:it|this) up)\b",
     re.IGNORECASE,
 )
+HELP_REQUEST_PATTERN = re.compile(
+    r"\b(?:give|offer|provide)\s+(?:me\s+)?(?:a\s+)?(?:hint|clue|nudge|help|guidance)\b"
+    r"|\b(?:can|could|would|will)\s+you\s+(?:help|guide|show)\s+me\b"
+    r"|\bcan i\s+(?:get|have)\s+(?:some\s+|a\s+)?(?:help|guidance|hint|clue)\b"
+    r"|\bi\s+(?:need|want)\s+(?:some\s+|a\s+)?(?:help|guidance|hint|clue)\b"
+    r"|\bi(?:'d| would)\s+like\s+(?:some\s+|a\s+)?(?:help|guidance|hint|clue)\b"
+    r"|\b(?:please\s+)?help\s+me\b"
+    r"|\bi(?:'m| am)\s+(?:stuck|lost|not sure (?:how|what|where))\b"
+    r"|\bwhat should i\s+(?:consider|do|draw|add|think about)\b"
+    r"|\b(?:show|give)\s+me\s+(?:an?\s+)?(?:example|approach)\b"
+    r"|\b(?:more|another|deeper)\s+(?:help|hint|detail|guidance)\b",
+    re.IGNORECASE,
+)
 
 PHASE_EXIT_COMPETENCIES: dict[InterviewPhase, tuple[Competency, ...]] = {
     InterviewPhase.REQUIREMENTS: (Competency.REQUIREMENTS_SCOPE,),
@@ -61,6 +77,7 @@ class InterviewEngineResult:
     text: str
     state: dict[str, object]
     feedback: FeedbackPlan | None = None
+    assistance: AssistanceTurn | None = None
     canvas_references: tuple[CanvasReference, ...] = ()
 
 
@@ -69,8 +86,22 @@ class StructuredInterviewEngine:
         self.llm = llm
         self.state = InterviewState()
 
-    def configure(self, problem: str | None) -> dict[str, object]:
-        self.state = InterviewState(problem=problem)
+    def configure(
+        self,
+        problem: str | None,
+        assistance_policy: str | AssistancePolicy | None = None,
+    ) -> dict[str, object]:
+        try:
+            policy = (
+                assistance_policy
+                if isinstance(assistance_policy, AssistancePolicy)
+                else AssistancePolicy(
+                    assistance_policy or AssistancePolicy.ADAPTIVE.value
+                )
+            )
+        except ValueError:
+            policy = AssistancePolicy.ADAPTIVE
+        self.state = InterviewState(problem=problem, assistance_policy=policy)
         return self.state.client_dict()
 
     async def start(self, context: InterviewContext) -> InterviewEngineResult:
@@ -100,6 +131,8 @@ class StructuredInterviewEngine:
                 context=context,
                 candidate_transcript=transcript,
             )
+        if HELP_REQUEST_PATTERN.search(transcript):
+            return await self._assist(context, transcript)
         plan = await self.llm.plan(self._context(context, "candidate"))
         return self._apply(plan, context=context, candidate_transcript=transcript)
 
@@ -121,12 +154,76 @@ class StructuredInterviewEngine:
             force_complete=True,
         )
 
-    def _context(self, context: InterviewContext, turn_mode: str) -> InterviewContext:
+    async def _assist(
+        self,
+        context: InterviewContext,
+        transcript: str,
+    ) -> InterviewEngineResult:
+        assistance = self.state.preview_assistance(
+            self._selected_object_ids(context)
+        )
+        plan = await self.llm.plan(
+            self._context(context, "help", assistance=assistance)
+        )
+        plan = replace(
+            plan,
+            candidate_intent=CandidateIntent.HELP_REQUEST,
+            action=InterviewAction.ASSIST,
+            question_status=(
+                self.state.current_question.status
+                if self.state.current_question
+                else QuestionStatus.NOT_APPLICABLE
+            ),
+            evidence_updates=(),
+            rubric_updates=(),
+            assumptions=(),
+            decisions=(),
+            covered_topics=(),
+            next_phase=self.state.phase,
+            next_question=QuestionPlan(),
+            final_feedback=FeedbackPlan(),
+        )
+        return self._apply(
+            plan,
+            context=context,
+            candidate_transcript=transcript,
+            assistance=assistance,
+        )
+
+    def _context(
+        self,
+        context: InterviewContext,
+        turn_mode: str,
+        *,
+        assistance: AssistanceTurn | None = None,
+    ) -> InterviewContext:
+        runtime_directive = dict(context.runtime_directive)
+        if assistance is not None:
+            runtime_directive["assistance"] = assistance.to_dict()
         return replace(
             context,
+            runtime_directive=runtime_directive,
             interview_state=self.state.prompt_dict(),
             turn_mode=turn_mode,
         )
+
+    @staticmethod
+    def _selected_object_ids(context: InterviewContext) -> tuple[str, ...]:
+        if context.diagram is None:
+            return ()
+        valid_ids = {
+            item.id for item in (*context.diagram.nodes, *context.diagram.edges)
+        }
+        selected_ids = (
+            context.selected_object_ids or context.diagram.selected_object_ids
+        )
+        return tuple(
+            dict.fromkeys(
+                identifier
+                for identifier in selected_ids
+                if identifier in valid_ids
+            )
+        )[:8]
 
     def _apply(
         self,
@@ -135,10 +232,12 @@ class StructuredInterviewEngine:
         context: InterviewContext,
         candidate_transcript: str,
         force_complete: bool = False,
+        assistance: AssistanceTurn | None = None,
     ) -> InterviewEngineResult:
         if candidate_transcript:
             self.state.turn_index += 1
-            self.state.phase_turns += 1
+            if assistance is None:
+                self.state.phase_turns += 1
 
         if self.state.current_question:
             self.state.current_question.status = plan.question_status
@@ -181,9 +280,13 @@ class StructuredInterviewEngine:
             QuestionStatus.NOT_APPLICABLE,
         } and plan.action not in {
             InterviewAction.ANSWER_CANDIDATE,
+            InterviewAction.ASSIST,
             InterviewAction.CLARIFY,
         }:
             self.state.current_question = None
+
+        if assistance is not None:
+            self.state.record_assistance(assistance)
 
         self.state.history.append(
             TurnRecord(
@@ -202,13 +305,20 @@ class StructuredInterviewEngine:
             text=plan.utterance,
             state=self.state.client_dict(),
             feedback=self.state.feedback if self.state.completed else None,
-            canvas_references=self._validated_canvas_references(plan, context),
+            assistance=assistance,
+            canvas_references=self._validated_canvas_references(
+                plan,
+                context,
+                assistance=assistance,
+            ),
         )
 
     @staticmethod
     def _validated_canvas_references(
         plan: InterviewTurnPlan,
         context: InterviewContext,
+        *,
+        assistance: AssistanceTurn | None = None,
     ) -> tuple[CanvasReference, ...]:
         if context.diagram is None:
             return ()
@@ -226,7 +336,24 @@ class StructuredInterviewEngine:
             )
             if object_ids:
                 references.append(replace(reference, object_ids=object_ids))
-        return tuple(references)
+        if assistance is not None and assistance.object_ids:
+            scope_ids = set(assistance.object_ids)
+            scope_is_referenced = any(
+                scope_ids.issubset(reference.object_ids)
+                for reference in references
+            )
+            if not scope_is_referenced:
+                references.insert(
+                    0,
+                    CanvasReference(
+                        kind=CanvasReferenceKind.FOCUS,
+                        label=(
+                            f"{assistance.level.value.capitalize()} requested here"
+                        ),
+                        object_ids=assistance.object_ids,
+                    ),
+                )
+        return tuple(references[:3])
 
     def _apply_evidence(
         self,

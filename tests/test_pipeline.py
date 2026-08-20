@@ -8,6 +8,9 @@ import pytest
 from voice_interviewer.audio import float32_to_pcm16
 from voice_interviewer.interview.engine import InterviewEngineResult
 from voice_interviewer.interview.models import (
+    AssistanceLevel,
+    AssistancePolicy,
+    AssistanceTurn,
     CanvasReference,
     CanvasReferenceKind,
 )
@@ -142,6 +145,14 @@ async def test_pipeline_emits_grounded_canvas_references_before_text(
         return InterviewEngineResult(
             text="The highlighted relation needs a label.",
             state={"phase": "high_level_design"},
+            assistance=AssistanceTurn(
+                AssistancePolicy.ADAPTIVE,
+                AssistanceLevel.NUDGE,
+                1,
+                "q-3:api-db",
+                "high-level architecture",
+                ("api-db",),
+            ),
             canvas_references=(
                 CanvasReference(
                     CanvasReferenceKind.ISSUE,
@@ -165,12 +176,20 @@ async def test_pipeline_emits_grounded_canvas_references_before_text(
     await pipeline.close()
 
     event_types = [event["type"] for event in events]
+    assistance_event = next(
+        event for event in events if event["type"] == "assistant.assistance"
+    )
     reference_event = next(
         event for event in events if event["type"] == "assistant.canvas.references"
+    )
+    assert event_types.index("assistant.assistance") < event_types.index(
+        "assistant.canvas.references"
     )
     assert event_types.index("assistant.canvas.references") < event_types.index(
         "assistant.text.final"
     )
+    assert assistance_event["payload"]["level"] == "nudge"
+    assert assistance_event["payload"]["requestIndex"] == 1
     assert reference_event["payload"]["references"][0]["objectIds"] == ["api-db"]
 
 

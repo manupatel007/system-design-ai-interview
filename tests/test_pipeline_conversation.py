@@ -86,6 +86,70 @@ async def test_pipeline_answers_diagram_meta_question_and_finishes_coherently(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_scopes_progressive_help_to_selected_canvas(
+    mock_settings,
+) -> None:
+    events: list[dict[str, object]] = []
+
+    async def capture(event: dict[str, object]) -> None:
+        events.append(event)
+
+    pipeline = InterviewSessionPipeline(
+        session_id="progressive-help",
+        settings=mock_settings,
+        stt=MockSTT("I need a hint."),
+        llm=MockInterviewLLM(),
+        tts=InstantTTS(),
+        vad=EnergyVad(),
+        send_event=capture,
+    )
+    await pipeline.start()
+    await pipeline.handle_control(
+        {
+            "type": "session.configure",
+            "payload": {
+                "problem": "Design a URL shortener",
+                "assistancePolicy": "adaptive",
+            },
+        }
+    )
+    await _wait_for_event(events, "assistant.response.completed", count=1)
+    initial_state = _events(events, "interview.state")[-1]["payload"]
+    question_id = initial_state["currentQuestion"]["id"]
+    await pipeline.handle_control(
+        {"type": "canvas.snapshot", "payload": _diagram_snapshot()}
+    )
+
+    speech = np.full(512 * 3, 0.1, dtype=np.float32)
+    silence = np.zeros(512 * 3, dtype=np.float32)
+    audio = float32_to_pcm16(np.concatenate((speech, silence)))
+    await pipeline.handle_audio(audio)
+    await _wait_for_event(events, "assistant.response.completed", count=2)
+    await pipeline.handle_audio(audio)
+    await _wait_for_event(events, "assistant.response.completed", count=3)
+
+    assistance_events = _events(events, "assistant.assistance")
+    assert [event["payload"]["level"] for event in assistance_events] == [
+        "nudge",
+        "concept",
+    ]
+    assert [event["payload"]["requestIndex"] for event in assistance_events] == [
+        1,
+        2,
+    ]
+    reference_events = _events(events, "assistant.canvas.references")
+    assert reference_events[-1]["payload"]["references"][0]["objectIds"] == [
+        "cache"
+    ]
+    final_state = _events(events, "interview.state")[-1]["payload"]
+    assert final_state["currentQuestion"]["id"] == question_id
+    assert final_state["phase"] == "requirements"
+    assert final_state["evidenceCount"] == 0
+    assert final_state["assistanceCount"] == 2
+    await pipeline.close()
+
+
+@pytest.mark.asyncio
 async def test_finish_waits_for_and_includes_final_transcript(mock_settings) -> None:
     events: list[dict[str, object]] = []
     llm = CapturingMockLLM()

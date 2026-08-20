@@ -116,6 +116,7 @@ async def test_databricks_returns_structured_interview_plan() -> None:
             session_id="test",
             transcript="Redirects require low latency.",
             turn_mode="candidate",
+            runtime_directive={"assistance": {"level": "nudge"}},
             interview_state={
                 "phase": "requirements",
                 "currentQuestion": {"text": "What latency do you need?"},
@@ -131,6 +132,7 @@ async def test_databricks_returns_structured_interview_plan() -> None:
     assert body["max_output_tokens"] == 1_200
     evidence = json.loads(body["input"][1]["content"].split("\n", 1)[1])
     assert evidence["turnMode"] == "candidate"
+    assert evidence["runtimeDirective"]["assistance"]["level"] == "nudge"
     assert evidence["interviewState"]["phase"] == "requirements"
 
 
