@@ -680,6 +680,209 @@ async def test_unsolicited_canvas_proposal_is_not_emitted_or_remembered() -> Non
     assert result.state["recentCanvasProposals"] == []
 
 
+@pytest.mark.asyncio
+async def test_voice_trigger_runs_persistent_guided_takeover_to_completion() -> None:
+    engine = StructuredInterviewEngine(MockInterviewLLM())
+    engine.configure("Design a URL shortener")
+    started = await engine.start(_context())
+    question_id = started.state["currentQuestion"]["id"]
+
+    result = await engine.respond(_context("Please walk me through this design step by step."))
+
+    assert result.canvas_proposal is not None
+    assert result.canvas_proposal_auto_accept is True
+    assert result.state["guidedTakeover"]["active"] is True
+    assert result.state["guidedTakeover"]["scoringPaused"] is True
+    assert result.state["guidedTakeover"]["currentStep"] == 1
+    assert result.state["currentQuestion"]["id"] == question_id
+    assert result.state["phase"] == "requirements"
+    assert result.state["evidenceCount"] == 0
+
+    for expected_step, command in zip(
+        (2, 3, 4),
+        ("please continue", "go on", "proceed"),
+        strict=True,
+    ):
+        result = await engine.respond(_context(command))
+        assert result.canvas_proposal is not None
+        assert result.canvas_proposal_auto_accept is True
+        assert result.state["guidedTakeover"]["currentStep"] == expected_step
+        assert result.state["currentQuestion"]["id"] == question_id
+        assert result.state["evidenceCount"] == 0
+
+    completed = await engine.respond(_context("next step"))
+
+    assert completed.canvas_proposal is None
+    assert completed.state["guidedTakeover"]["active"] is False
+    assert completed.state["guidedTakeover"]["status"] == "completed"
+    assert completed.state["guidedTakeover"]["scoringPaused"] is False
+    assert completed.state["currentQuestion"]["id"] == question_id
+    assert "explain the request path" in completed.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_guided_explanations_do_not_advance_or_mutate_canvas() -> None:
+    engine = StructuredInterviewEngine(MockInterviewLLM())
+    engine.configure("Design a URL shortener")
+    started = await engine.start(_context())
+    question_id = started.state["currentQuestion"]["id"]
+    first = await engine.start_guided_takeover(_context())
+    proposal_count = first.state["canvasProposalCount"]
+
+    why = await engine.guided_takeover_command(_context(), "why")
+    alternative = await engine.guided_takeover_command(_context(), "alternative")
+    handed_back = await engine.guided_takeover_command(_context(), "take_back")
+
+    assert why.canvas_proposal is None
+    assert alternative.canvas_proposal is None
+    assert why.state["guidedTakeover"]["currentStep"] == 1
+    assert alternative.state["canvasProposalCount"] == proposal_count
+    assert handed_back.state["guidedTakeover"]["active"] is False
+    assert handed_back.state["guidedTakeover"]["status"] == "handed_back"
+    assert handed_back.state["currentQuestion"]["id"] == question_id
+    assert handed_back.state["evidenceCount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_guided_takeover_builds_on_accepted_assistant_layer() -> None:
+    engine = StructuredInterviewEngine(MockInterviewLLM())
+    engine.configure("Design a URL shortener")
+    await engine.start(_context())
+
+    first = await engine.start_guided_takeover(
+        _context(
+            diagram=_client_only_diagram(),
+            selected_object_ids=("client",),
+        ),
+        scope="selection",
+    )
+    second = await engine.guided_takeover_command(
+        _context(
+            diagram=_diagram_with_assistant(),
+            selected_object_ids=("ai-lb",),
+        ),
+        "continue",
+    )
+
+    assert first.canvas_proposal is not None
+    assert first.canvas_proposal.edges[0].source_id == "client"
+    assert second.canvas_proposal is not None
+    assert second.canvas_proposal.nodes[0].role is CanvasProposalNodeRole.SERVICE
+    assert second.canvas_proposal.edges[0].source_id == "ai-lb"
+    assert second.canvas_anchor_ids == ("ai-lb",)
+
+
+@pytest.mark.asyncio
+async def test_guided_takeover_retries_invalid_canvas_proposal_once() -> None:
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            _plan(utterance="I could not produce the step."),
+            _plan(utterance="The retry was also empty."),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener")
+    await engine.start(_context())
+
+    result = await engine.start_guided_takeover(_context())
+
+    assert planner.calls == 3
+    assert result.canvas_proposal is None
+    assert result.canvas_proposal_auto_accept is False
+    assert result.state["guidedTakeover"]["status"] == "paused"
+    assert result.state["guidedTakeover"]["step"]["status"] == "needs_retry"
+    assert result.state["guidedTakeover"]["canContinue"] is True
+    assert "left the canvas untouched" in result.text
+
+
+@pytest.mark.asyncio
+async def test_guided_takeover_strips_provider_scoring_updates() -> None:
+    proposal = CanvasProposal(
+        kind=CanvasProposalKind.SCOPED,
+        title="Add an ingress",
+        nodes=(
+            CanvasProposalNode(
+                "guided-ingress",
+                "Load Balancer",
+                CanvasProposalNodeRole.LOAD_BALANCER,
+                1,
+            ),
+        ),
+    )
+    planner = ScriptedLLM(
+        [
+            _start_plan(),
+            _plan(
+                utterance="I added the ingress boundary.",
+                action=InterviewAction.TRANSITION,
+                question_status=QuestionStatus.ANSWERED,
+                next_phase=InterviewPhase.ESTIMATION,
+                next_question=QuestionPlan(
+                    "What scale should we support?",
+                    "capacity estimation",
+                    (Competency.CAPACITY_ESTIMATION,),
+                ),
+                evidence_updates=(
+                    EvidenceUpdate(
+                        Competency.ARCHITECTURE_FLOW,
+                        "The AI added a load balancer.",
+                        EvidenceSource.DIAGRAM,
+                        ("guided-ingress",),
+                    ),
+                ),
+                rubric_updates=(
+                    RubricUpdate(
+                        Competency.ARCHITECTURE_FLOW,
+                        RubricLevel.DEMONSTRATED,
+                        "The diagram has an ingress.",
+                    ),
+                ),
+                assumptions=("Traffic is global",),
+                covered_topics=("ingress",),
+                canvas_proposal=proposal,
+            ),
+        ]
+    )
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener")
+    started = await engine.start(_context())
+    question_id = started.state["currentQuestion"]["id"]
+
+    result = await engine.start_guided_takeover(_context())
+
+    assert result.canvas_proposal is not None
+    assert result.state["phase"] == "requirements"
+    assert result.state["currentQuestion"]["id"] == question_id
+    assert result.state["evidenceCount"] == 0
+    assert result.state["assumptions"] == []
+    assert "ingress" not in result.state["coveredTopics"]
+    architecture = next(
+        entry
+        for entry in result.state["rubric"]
+        if entry["competency"] == "architecture_and_data_flow"
+    )
+    assert architecture["level"] == "not_observed"
+
+
+@pytest.mark.asyncio
+async def test_guided_provider_failure_rolls_back_takeover_state() -> None:
+    planner = FailsAfterStartLLM()
+    engine = StructuredInterviewEngine(planner)
+    engine.configure("Design a URL shortener")
+    started = await engine.start(_context())
+    question_id = started.state["currentQuestion"]["id"]
+
+    with pytest.raises(LLMProviderError, match="invalid plan"):
+        await engine.start_guided_takeover(_context())
+
+    state = engine.state.client_dict()
+    assert state["guidedTakeover"]["active"] is False
+    assert state["guidedTakeover"]["status"] == "inactive"
+    assert state["currentQuestion"]["id"] == question_id
+    assert state["evidenceCount"] == 0
+
+
 def test_plan_rejects_multiple_spoken_questions() -> None:
     with pytest.raises(InterviewPlanValidationError, match="at most one question"):
         _plan(utterance="Why Redis? How will you invalidate it?")

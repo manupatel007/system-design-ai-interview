@@ -69,6 +69,8 @@ class MockInterviewLLM:
             )
         if context.turn_mode == "finalize":
             return self._final_plan(context)
+        if context.turn_mode == "guided_takeover":
+            return self._guided_takeover_plan(context)
         if context.turn_mode == "help":
             return self._help_plan(context)
         if phase is InterviewPhase.INTRODUCTION:
@@ -98,6 +100,52 @@ class MockInterviewLLM:
         if phase is InterviewPhase.RELIABILITY_SCALE:
             return self._reliability_plan(context)
         return self._wrap_up_plan(context)
+
+    def _guided_takeover_plan(
+        self,
+        context: InterviewContext,
+    ) -> InterviewTurnPlan:
+        directive = context.runtime_directive.get("guidedTakeover", {})
+        values = directive if isinstance(directive, dict) else {}
+        command = str(values.get("command", "continue"))
+        title = str(values.get("stepTitle", "Architecture step")).strip()
+        goal = str(values.get("stepGoal", "Make the next boundary explicit")).strip()
+        step_index = max(1, int(values.get("stepIndex", 1) or 1))
+        goal_fragment = goal[:220].rstrip(".").lower()
+        phase = self._phase(context)
+        if command in {"why", "question"}:
+            question = str(values.get("question", "")).strip()
+            detail = (
+                f" The question to connect back to is: {question[:180]}."
+                if question
+                else ""
+            )
+            utterance = (
+                f"{title} matters because it helps us {goal_fragment}."
+                f"{detail}"
+            )
+            proposal = CanvasProposal()
+        elif command == "alternative":
+            utterance = (
+                f"An alternative for {title.lower()} is to combine the boundary "
+                "with its nearest service; that reduces moving parts but couples "
+                "scaling and failure behavior. I left the canvas unchanged."
+            )
+            proposal = CanvasProposal()
+        else:
+            proposal = self._canvas_proposal(context)
+            utterance = (
+                f"Step {step_index}, {title}: I added one bounded part of the "
+                f"design to {goal_fragment}."
+            )
+        return self._plan(
+            utterance=utterance,
+            candidate_intent=CandidateIntent.HELP_REQUEST,
+            action=InterviewAction.ASSIST,
+            question_status=self._current_question_status(context),
+            next_phase=phase,
+            canvas_proposal=proposal,
+        )
 
     def _help_plan(self, context: InterviewContext) -> InterviewTurnPlan:
         phase = self._phase(context)
@@ -237,6 +285,14 @@ class MockInterviewLLM:
             return self._reference_architecture(max_nodes, max_edges)
         if kind is not CanvasProposalKind.SCOPED:
             return CanvasProposal()
+        guided = context.runtime_directive.get("guidedTakeover")
+        if isinstance(guided, dict):
+            return self._guided_takeover_canvas_proposal(
+                context,
+                guided,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+            )
         return self._scoped_canvas_proposal(
             context,
             request,
@@ -249,6 +305,145 @@ class MockInterviewLLM:
         if isinstance(value, bool) or not isinstance(value, int):
             return maximum
         return min(maximum, max(0, value))
+
+    def _guided_takeover_canvas_proposal(
+        self,
+        context: InterviewContext,
+        directive: dict[str, object],
+        *,
+        max_nodes: int,
+        max_edges: int,
+    ) -> CanvasProposal:
+        try:
+            step_index = max(0, int(directive.get("stepIndex", 1) or 1) - 1)
+        except (TypeError, ValueError):
+            step_index = 0
+        desired_by_step = (
+            (
+                (CanvasProposalNodeRole.CLIENT, "Client"),
+                (CanvasProposalNodeRole.LOAD_BALANCER, "Load Balancer"),
+            ),
+            ((CanvasProposalNodeRole.SERVICE, "Application Service"),),
+            (
+                (CanvasProposalNodeRole.CACHE, "Read Cache"),
+                (CanvasProposalNodeRole.DATABASE, "Primary Store"),
+            ),
+            (
+                (CanvasProposalNodeRole.QUEUE, "Event Queue"),
+                (CanvasProposalNodeRole.WORKER, "Async Worker"),
+            ),
+        )
+        desired = desired_by_step[min(step_index, len(desired_by_step) - 1)]
+        diagram_nodes = context.diagram.all_nodes if context.diagram else ()
+        diagram_edges = context.diagram.all_edges if context.diagram else ()
+        existing_by_role = {
+            node.role: node.id
+            for node in diagram_nodes
+            if node.role not in {"component", "annotation"}
+        }
+        layer_by_role = {
+            CanvasProposalNodeRole.CLIENT: 0,
+            CanvasProposalNodeRole.LOAD_BALANCER: 1,
+            CanvasProposalNodeRole.SERVICE: 2,
+            CanvasProposalNodeRole.CACHE: 3,
+            CanvasProposalNodeRole.DATABASE: 3,
+            CanvasProposalNodeRole.QUEUE: 3,
+            CanvasProposalNodeRole.WORKER: 4,
+            CanvasProposalNodeRole.OBSERVABILITY: 5,
+        }
+        nodes: list[CanvasProposalNode] = []
+        identifiers = dict(existing_by_role)
+        for role, label in desired:
+            if role.value in identifiers or len(nodes) >= max_nodes:
+                continue
+            identifier = f"guided-{step_index + 1}-{role.value.replace('_', '-')}"
+            identifiers[role.value] = identifier
+            nodes.append(
+                CanvasProposalNode(
+                    id=identifier,
+                    label=label,
+                    role=role,
+                    layer=layer_by_role[role],
+                )
+            )
+
+        relationships = (
+            (("client", "load_balancer", "HTTPS"),),
+            (("load_balancer", "service", "route"),),
+            (
+                ("service", "cache", "lookup"),
+                ("service", "database", "read / write"),
+            ),
+            (
+                ("service", "queue", "publish"),
+                ("queue", "worker", "consume"),
+            ),
+        )[min(step_index, 3)]
+        existing_pairs = {
+            (edge.source_id, edge.target_id)
+            for edge in diagram_edges
+            if edge.source_id and edge.target_id
+        }
+        edges: list[CanvasProposalEdge] = []
+        for source_role, target_role, label in relationships:
+            source_id = identifiers.get(source_role)
+            target_id = identifiers.get(target_role)
+            if (
+                not source_id
+                or not target_id
+                or (source_id, target_id) in existing_pairs
+                or len(edges) >= max_edges
+            ):
+                continue
+            edges.append(
+                CanvasProposalEdge(
+                    id=(
+                        f"guided-{step_index + 1}-"
+                        f"{source_role.replace('_', '-')}-"
+                        f"{target_role.replace('_', '-')}"
+                    ),
+                    label=label,
+                    source_id=source_id,
+                    target_id=target_id,
+                )
+            )
+
+        if not nodes and not edges and max_nodes:
+            role = CanvasProposalNodeRole.OBSERVABILITY
+            identifier = f"guided-{step_index + 1}-observability"
+            nodes.append(
+                CanvasProposalNode(
+                    id=identifier,
+                    label="Metrics and Tracing",
+                    role=role,
+                    layer=layer_by_role[role],
+                )
+            )
+            source_id = (
+                identifiers.get("worker")
+                or identifiers.get("service")
+                or next(iter(identifiers.values()), None)
+            )
+            if source_id and max_edges:
+                edges.append(
+                    CanvasProposalEdge(
+                        id=f"guided-{step_index + 1}-telemetry",
+                        label="telemetry",
+                        source_id=source_id,
+                        target_id=identifier,
+                    )
+                )
+        if not nodes and not edges:
+            return CanvasProposal()
+        title = str(directive.get("stepTitle", "Architecture step")).strip()
+        goal = str(directive.get("stepGoal", "")).strip()
+        return CanvasProposal(
+            kind=CanvasProposalKind.SCOPED,
+            title=f"Step {step_index + 1}: {title}",
+            summary=goal or "One reversible walkthrough step.",
+            nodes=tuple(nodes),
+            edges=tuple(edges),
+        )
 
     def _scoped_canvas_proposal(
         self,

@@ -39,13 +39,19 @@ nodes and edges with stable IDs, labels, roles, and relative layout hints. `scop
 anchored to the current selection or active question; `reference` proposals provide a complete,
 non-authoritative architecture skeleton for comparison.
 
-The frontend converts these records into purple ghost Excalidraw elements and presents Keep and
-Reject actions. Proposed, rejected, and feedback-overlay elements stay outside the normalizer.
-Kept proposal components and connectors are normalized into `assistantLayer.nodes` and
-`assistantLayer.edges`; their stable scene IDs let a later proposal connect to them. Candidate
-objects remain in the top-level `nodes` and `edges` arrays, and candidate deltas ignore assistant
-changes. The provider may reason over both layers, while evidence and rubric validation use only
-the candidate layer.
+The frontend converts these records into purple ghost Excalidraw elements. Ordinary draw help
+presents Keep and Reject actions, while an explicitly authorized Guided Takeover auto-accepts one
+bounded step at a time. Proposed, rejected, and feedback-overlay elements stay outside the
+normalizer. Kept or auto-accepted proposal components and connectors are normalized into
+`assistantLayer.nodes` and `assistantLayer.edges`; their stable scene IDs let a later proposal
+connect to them. Each guided step is recorded separately, so **Undo AI** removes the most recent
+step without touching candidate work.
+
+Auto-accept immediately publishes a new semantic snapshot. The next guided planner call therefore
+receives its earlier components and edges rather than repeatedly seeing only the candidate layer.
+Candidate objects remain in the top-level `nodes` and `edges` arrays, and candidate deltas ignore
+assistant changes. The provider may reason over both layers, while evidence and rubric validation
+use only the candidate layer.
 
 ## Role Inference
 
@@ -146,6 +152,7 @@ The script performs a frozen install, runs the pure scene-normalizer tests, and 
 
 - `frontend/src/diagram.test.js` covers labels, bindings, roles, groups, selection, fingerprints, and semantic deltas.
 - `frontend/src/canvas-feedback.test.js` covers multi-element regions, relationship outlines, target validation, and overlay cleanup.
+- `frontend/src/ai-preview.test.js` covers proposal layout, accepted-AI extension, reversible acceptance, and guided assistant-layer isolation.
 - `tests/test_diagram.py` covers validation, compact prompt projection, references, and duplicate IDs.
 - `tests/test_pipeline_diagram.py` covers WebSocket control handling, synchronization, STT glossary enrichment, and invalid scene errors.
 - `tests/test_server.py` confirms the built Excalidraw bundle and `canvas.synced` path are served end to end.

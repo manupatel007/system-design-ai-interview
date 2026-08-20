@@ -88,6 +88,25 @@ eligible for evidence. The reducer validates IDs, limits size, and only permits 
 candidate explicitly asks for help. Grounded feedback remains separate: numbered purple outlines
 identify exact existing nodes or edges when the interviewer explains a diagram issue.
 
+### Guided Takeover
+
+Use Guided Takeover when you want the interviewer to take the floor and teach through the canvas
+one reversible step at a time:
+
+1. Reach a design question and optionally select the area you want extended.
+2. Click **Walk me through** beside the canvas controls, or say **"Walk me through this design."**
+3. The interviewer explains and automatically applies one bounded purple AI step. The panel shows
+   the current step, objective, suggested questions, and **Scoring paused**.
+4. Choose **Continue**, **Why?**, **Alternative**, a suggested-question chip, or **Take back**.
+5. After the last step, explain the request path and trade-offs in your own words to resume the
+   original interview question.
+
+The default walkthrough covers entry/routing, the core request path, state and fast reads, then
+asynchronous work and operations. One explicit takeover authorization permits its later steps to
+apply automatically; the user does not need to approve every canvas mutation. **Undo AI** removes
+an applied step. Every generated component remains in `assistantLayer`, is available to the next
+walkthrough step, and is excluded from candidate evidence and rubric coverage.
+
 ### Ask for Scoped Help
 
 Choose a **Practice support** policy in **Interview setup** before joining:
@@ -181,6 +200,7 @@ Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databr
 - Live rubric levels represent evidence coverage, not a final hiring score; diagram shapes alone cannot upgrade them.
 - Interview state is in memory only and is discarded when the WebSocket session closes.
 - Provider plans require strict structured-output support; malformed plans fail without mutating state.
+- Guided Takeover currently uses a four-step generic blueprint; **Alternative** explains a branch but does not redraw or fork canvas history.
 - Piper emits one PCM chunk per sentence; the browser schedules chunks sequentially and barge-in clears queued playback.
 - Kokoro remains a full-response compatibility backend and does not provide low-latency sentence streaming.
 - Raw audio is held only for the active utterance and is not persisted.

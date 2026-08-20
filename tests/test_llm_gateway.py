@@ -150,6 +150,34 @@ def test_reference_architecture_plan_gets_larger_output_budget() -> None:
     assert request.max_output_tokens == 2_400
 
 
+def test_guided_takeover_plan_uses_canvas_budget_and_trusted_directives() -> None:
+    request = GatewayInterviewLLM.build_plan_request(
+        InterviewContext(
+            session_id="guided-contract",
+            turn_mode="guided_takeover",
+            runtime_directive={
+                "guidedTakeover": {
+                    "command": "continue",
+                    "stepIndex": 2,
+                    "stepTitle": "Core request path",
+                },
+                "canvasProposal": {
+                    "kind": "scoped",
+                    "maxNodes": 3,
+                    "maxEdges": 4,
+                },
+            },
+        )
+    )
+
+    assert request.max_output_tokens == 1_600
+    assert "turnMode=guided_takeover" in request.messages[0].content
+    evidence = json.loads(request.messages[1].content.split("\n", 1)[1])
+    assert evidence["turnMode"] == "guided_takeover"
+    assert evidence["runtimeDirective"]["guidedTakeover"]["command"] == "continue"
+    assert evidence["runtimeDirective"]["canvasProposal"]["maxNodes"] == 3
+
+
 @pytest.mark.asyncio
 async def test_azure_foundry_returns_structured_interview_plan() -> None:
     captured: dict[str, object] = {}

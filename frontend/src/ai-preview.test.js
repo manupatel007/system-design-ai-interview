@@ -7,6 +7,7 @@ import {
   isAiPreviewElement,
   removeAiProposal,
 } from "./ai-preview.js";
+import { normalizeScene } from "./diagram.js";
 
 test("builds a scoped structured proposal beside the selected component", () => {
   const elements = [
@@ -168,6 +169,26 @@ test("accepts and removes only the targeted AI proposal", () => {
     removeAiProposal(accepted, "proposal-1").map((element) => element.id),
     ["api", "second"],
   );
+});
+
+test("auto-accepted guided proposal remains outside candidate evidence", () => {
+  const proposed = {
+    ...previewElement("guided-service", "guided-step-1"),
+    customData: {
+      ...previewElement("guided-service", "guided-step-1").customData,
+      aiPreviewKind: "component",
+      label: "Application Service",
+      systemDesignRole: "service",
+    },
+  };
+
+  const accepted = acceptAiProposal([proposed], "guided-step-1");
+  const scene = normalizeScene(accepted);
+
+  assert.deepEqual(scene.nodes, []);
+  assert.equal(scene.assistantLayer.nodes.length, 1);
+  assert.equal(scene.assistantLayer.nodes[0].label, "Application Service");
+  assert.equal(scene.assistantLayer.nodes[0].role, "service");
 });
 
 function component(id, x, y) {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from dataclasses import dataclass, replace
 
 from voice_interviewer.interview.models import (
@@ -27,6 +28,8 @@ from voice_interviewer.interview.models import (
 )
 from voice_interviewer.interview.state import (
     EvidenceRecord,
+    GuidedTakeoverState,
+    GuidedTakeoverStep,
     InterviewState,
     QuestionState,
     TurnRecord,
@@ -80,6 +83,68 @@ HELP_REQUEST_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+GUIDED_TAKEOVER_START_PATTERN = re.compile(
+    r"\b(?:walk me through|take over(?: this| the)?(?: section| design| canvas)?|"
+    r"build (?:this|it).*(?:explain|step by step)|"
+    r"show me .*step by step|demonstrate .*?(?:diagram|canvas|design))\b",
+    re.IGNORECASE,
+)
+GUIDED_TAKEOVER_CONTINUE_PATTERN = re.compile(
+    r"^\s*(?:please\s+)?(?:continue|next(?: step)?|go on|keep going|proceed)"
+    r"(?:\s+please)?\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+GUIDED_TAKEOVER_ALTERNATIVE_PATTERN = re.compile(
+    r"\b(?:alternative|another approach|different (?:approach|design)|other option)\b",
+    re.IGNORECASE,
+)
+GUIDED_TAKEOVER_EXIT_PATTERN = re.compile(
+    r"\b(?:take back|let me take over|my turn|stop (?:the )?walkthrough|"
+    r"resume (?:the )?interview|hand (?:it|control) back)\b",
+    re.IGNORECASE,
+)
+
+GUIDED_TAKEOVER_BLUEPRINT = (
+    (
+        "entry-routing",
+        "Entry and routing",
+        "Establish the external caller and the ingress or routing boundary.",
+    ),
+    (
+        "core-request-path",
+        "Core request path",
+        "Add the main application boundary and label the synchronous request path.",
+    ),
+    (
+        "state-and-fast-reads",
+        "State and fast reads",
+        "Add durable state and the read-optimization path, including fallback behavior.",
+    ),
+    (
+        "async-and-operations",
+        "Async work and operations",
+        "Add asynchronous work and make one important operational concern visible.",
+    ),
+)
+GUIDED_TAKEOVER_QUESTIONS = (
+    (
+        "Why separate entry routing from application logic?",
+        "What changes if traffic spans multiple regions?",
+    ),
+    (
+        "Why is this the right service boundary?",
+        "Where should validation and rate limiting live?",
+    ),
+    (
+        "What happens on a cache miss?",
+        "Which data must remain strongly consistent?",
+    ),
+    (
+        "Why make this work asynchronous?",
+        "What failure signal should wake the operator?",
+    ),
+)
+
 PHASE_EXIT_COMPETENCIES: dict[InterviewPhase, tuple[Competency, ...]] = {
     InterviewPhase.REQUIREMENTS: (Competency.REQUIREMENTS_SCOPE,),
     InterviewPhase.ESTIMATION: (Competency.CAPACITY_ESTIMATION,),
@@ -102,6 +167,8 @@ class InterviewEngineResult:
     assistance: AssistanceTurn | None = None
     canvas_references: tuple[CanvasReference, ...] = ()
     canvas_proposal: CanvasProposal | None = None
+    canvas_proposal_auto_accept: bool = False
+    canvas_anchor_ids: tuple[str, ...] = ()
 
 
 class StructuredInterviewEngine:
@@ -142,6 +209,26 @@ class StructuredInterviewEngine:
             return self._completed_result()
         if FINISH_PATTERN.search(transcript):
             return await self.finalize(context)
+        if self.state.guided_takeover.active:
+            if GUIDED_TAKEOVER_EXIT_PATTERN.search(transcript):
+                return await self.guided_takeover_command(context, "take_back")
+            if GUIDED_TAKEOVER_CONTINUE_PATTERN.search(transcript):
+                return await self.guided_takeover_command(context, "continue")
+            if GUIDED_TAKEOVER_ALTERNATIVE_PATTERN.search(transcript):
+                return await self.guided_takeover_command(context, "alternative")
+            return await self.guided_takeover_command(
+                context,
+                "question",
+                question=transcript,
+            )
+        if GUIDED_TAKEOVER_START_PATTERN.search(transcript):
+            selected_ids = self._selected_object_ids(context)
+            scope = "selection" if selected_ids else (
+                "end_to_end"
+                if re.search(r"\b(?:complete|full|end[- ]to[- ]end)\b", transcript)
+                else "current_question"
+            )
+            return await self.start_guided_takeover(context, scope=scope)
         if DIAGRAM_QUESTION_PATTERN.search(transcript):
             return self._apply(
                 self._diagram_visibility_plan(context),
@@ -172,7 +259,116 @@ class StructuredInterviewEngine:
         plan = await self.llm.plan(self._context(context, "candidate"))
         return self._apply(plan, context=context, candidate_transcript=transcript)
 
+    async def start_guided_takeover(
+        self,
+        context: InterviewContext,
+        *,
+        scope: str = "current_question",
+        step_count: int = 4,
+    ) -> InterviewEngineResult:
+        if self.state.completed:
+            return self._completed_result()
+        if self.state.guided_takeover.active:
+            return self._guided_takeover_message(
+                context,
+                "The walkthrough is already active. Continue, ask why, request an "
+                "alternative, or take the floor back.",
+            )
+        normalized_scope = (
+            scope
+            if scope in {"selection", "current_question", "end_to_end"}
+            else "current_question"
+        )
+        bounded_count = min(
+            len(GUIDED_TAKEOVER_BLUEPRINT),
+            max(1, step_count),
+        )
+        steps = [
+            GuidedTakeoverStep(identifier, title, goal)
+            for identifier, title, goal in GUIDED_TAKEOVER_BLUEPRINT[:bounded_count]
+        ]
+        previous_takeover = self.state.guided_takeover
+        self.state.guided_takeover = GuidedTakeoverState(
+            active=True,
+            status="planning",
+            scope=normalized_scope,
+            objective=self._guided_takeover_objective(context, normalized_scope),
+            steps=steps,
+        )
+        try:
+            return await self._run_guided_takeover_step(context, command="start")
+        except BaseException:
+            self.state.guided_takeover = previous_takeover
+            raise
+
+    async def guided_takeover_command(
+        self,
+        context: InterviewContext,
+        command: str,
+        *,
+        question: str = "",
+    ) -> InterviewEngineResult:
+        takeover = self.state.guided_takeover
+        if not takeover.active:
+            return self._guided_takeover_message(
+                context,
+                "No walkthrough is active. Use Walk me through when you want me "
+                "to demonstrate on the canvas.",
+            )
+        if command == "take_back":
+            takeover.active = False
+            takeover.status = "handed_back"
+            takeover.suggested_questions = []
+            return self._guided_takeover_message(
+                context,
+                "You have the floor again. Explain or change any part of the "
+                "walkthrough, and I will resume the interview from the same question.",
+            )
+        if command == "continue":
+            previous_takeover = deepcopy(takeover)
+            try:
+                if takeover.steps[takeover.step_index].status == "needs_retry":
+                    return await self._run_guided_takeover_step(
+                        context,
+                        command="retry",
+                    )
+                if takeover.step_index + 1 >= len(takeover.steps):
+                    takeover.active = False
+                    takeover.status = "completed"
+                    takeover.suggested_questions = []
+                    return self._guided_takeover_message(
+                        context,
+                        "That completes the walkthrough. Take the floor and explain the "
+                        "request path and the trade-off you would revisit first.",
+                    )
+                takeover.steps[takeover.step_index].status = "completed"
+                takeover.step_index += 1
+                return await self._run_guided_takeover_step(
+                    context,
+                    command="continue",
+                )
+            except BaseException:
+                self.state.guided_takeover = previous_takeover
+                raise
+        if command in {"why", "question", "alternative"}:
+            previous_takeover = deepcopy(takeover)
+            try:
+                return await self._explain_guided_takeover_step(
+                    context,
+                    command=command,
+                    question=question,
+                )
+            except BaseException:
+                self.state.guided_takeover = previous_takeover
+                raise
+        return self._guided_takeover_message(
+            context,
+            "That walkthrough command is not supported. Continue, ask why, "
+            "request an alternative, or take the floor back.",
+        )
     async def finalize(self, context: InterviewContext) -> InterviewEngineResult:
+        self.state.guided_takeover.active = False
+        self.state.guided_takeover.status = "handed_back"
         if self.state.completed:
             return self._completed_result()
         plan = await self.llm.plan(self._context(context, "finalize"))
@@ -189,6 +385,204 @@ class StructuredInterviewEngine:
             candidate_transcript=context.transcript.strip(),
             force_complete=True,
         )
+
+    def _guided_takeover_objective(
+        self,
+        context: InterviewContext,
+        scope: str,
+    ) -> str:
+        topic = (
+            self.state.current_question.topic
+            if self.state.current_question
+            else self.state.phase.value.replace("_", " ")
+        )
+        problem = self.state.problem or context.problem or "the current system"
+        if scope == "selection" and self._selected_object_ids(context):
+            return f"Explain and extend the selected canvas area for {topic}."
+        if scope == "end_to_end":
+            return f"Build one illustrative end-to-end architecture for {problem}."
+        if context.diagram is None or not context.diagram.all_nodes:
+            return f"Build {problem} from a blank canvas while explaining each boundary."
+        return f"Continue the current {topic} design one justified step at a time."
+
+    def _guided_takeover_context(
+        self,
+        context: InterviewContext,
+        *,
+        command: str,
+        include_canvas: bool,
+        question: str = "",
+        retry: bool = False,
+    ) -> InterviewContext:
+        takeover = self.state.guided_takeover
+        step = takeover.steps[takeover.step_index]
+        runtime_directive = dict(context.runtime_directive)
+        runtime_directive["guidedTakeover"] = {
+            "command": command,
+            "scope": takeover.scope,
+            "objective": takeover.objective,
+            "stepIndex": takeover.step_index + 1,
+            "totalSteps": len(takeover.steps),
+            "stepTitle": step.title,
+            "stepGoal": step.goal,
+            "question": question[:500],
+            "retryAfterEmptyProposal": retry,
+        }
+        if include_canvas:
+            runtime_directive["canvasProposal"] = {
+                "kind": CanvasProposalKind.SCOPED.value,
+                "maxNodes": 3,
+                "maxEdges": 4,
+                "anchorObjectIds": list(self._selected_object_ids(context)),
+            }
+        return replace(
+            context,
+            runtime_directive=runtime_directive,
+            interview_state=self.state.prompt_dict(),
+            turn_mode="guided_takeover",
+        )
+
+    async def _run_guided_takeover_step(
+        self,
+        context: InterviewContext,
+        *,
+        command: str,
+    ) -> InterviewEngineResult:
+        takeover = self.state.guided_takeover
+        step = takeover.steps[takeover.step_index]
+        takeover.status = "demonstrating"
+        step.status = "active"
+        plan = await self.llm.plan(
+            self._guided_takeover_context(
+                context,
+                command=command,
+                include_canvas=True,
+            )
+        )
+        proposal = self._validated_canvas_proposal(
+            plan.canvas_proposal,
+            context,
+            requested_kind=CanvasProposalKind.SCOPED,
+            max_nodes=3,
+            max_edges=4,
+        )
+        if proposal is None:
+            plan = await self.llm.plan(
+                self._guided_takeover_context(
+                    context,
+                    command=command,
+                    include_canvas=True,
+                    retry=True,
+                )
+            )
+            proposal = self._validated_canvas_proposal(
+                plan.canvas_proposal,
+                context,
+                requested_kind=CanvasProposalKind.SCOPED,
+                max_nodes=3,
+                max_edges=4,
+            )
+        if proposal is None:
+            step.status = "needs_retry"
+            takeover.status = "paused"
+            takeover.suggested_questions = [
+                "Retry this step",
+                "Explain the step without drawing",
+            ]
+            plan = replace(
+                plan,
+                utterance=(
+                    "The next diagram change did not validate, so I left the canvas "
+                    "untouched. Continue to retry, ask why, or take the floor back."
+                ),
+            )
+        else:
+            step.status = "completed"
+            takeover.status = "paused"
+            takeover.suggested_questions = list(
+                GUIDED_TAKEOVER_QUESTIONS[
+                    min(takeover.step_index, len(GUIDED_TAKEOVER_QUESTIONS) - 1)
+                ]
+            )
+            if command == "start":
+                plan = replace(
+                    plan,
+                    utterance=(
+                        f"I'll use {len(takeover.steps)} short reversible steps. "
+                        f"{plan.utterance}"
+                    ),
+                )
+        takeover.last_explanation = plan.utterance
+        guarded_plan = self._guard_guided_takeover_plan(plan)
+        return self._apply(
+            guarded_plan,
+            context=context,
+            candidate_transcript="",
+            canvas_proposal=proposal,
+            canvas_proposal_auto_accept=proposal is not None,
+            canvas_anchor_ids=self._selected_object_ids(context),
+        )
+
+    async def _explain_guided_takeover_step(
+        self,
+        context: InterviewContext,
+        *,
+        command: str,
+        question: str,
+    ) -> InterviewEngineResult:
+        takeover = self.state.guided_takeover
+        takeover.status = "explaining"
+        plan = await self.llm.plan(
+            self._guided_takeover_context(
+                context,
+                command=command,
+                include_canvas=False,
+                question=question,
+            )
+        )
+        takeover.status = "paused"
+        takeover.last_explanation = plan.utterance
+        return self._apply(
+            self._guard_guided_takeover_plan(plan),
+            context=context,
+            candidate_transcript="",
+        )
+
+    def _guard_guided_takeover_plan(
+        self,
+        plan: InterviewTurnPlan,
+    ) -> InterviewTurnPlan:
+        return replace(
+            plan,
+            candidate_intent=CandidateIntent.HELP_REQUEST,
+            action=InterviewAction.ASSIST,
+            question_status=(
+                self.state.current_question.status
+                if self.state.current_question
+                else QuestionStatus.NOT_APPLICABLE
+            ),
+            evidence_updates=(),
+            rubric_updates=(),
+            assumptions=(),
+            decisions=(),
+            covered_topics=(),
+            next_phase=self.state.phase,
+            next_question=QuestionPlan(),
+            final_feedback=FeedbackPlan(),
+            canvas_proposal=CanvasProposal(),
+        )
+
+    def _guided_takeover_message(
+        self,
+        context: InterviewContext,
+        text: str,
+    ) -> InterviewEngineResult:
+        plan = self._local_plan(
+            intent=CandidateIntent.HELP_REQUEST,
+            action=InterviewAction.ASSIST,
+            utterance=text,
+        )
+        return self._apply(plan, context=context, candidate_transcript="")
 
     async def _assist(
         self,
@@ -319,6 +713,8 @@ class StructuredInterviewEngine:
         force_complete: bool = False,
         assistance: AssistanceTurn | None = None,
         canvas_proposal: CanvasProposal | None = None,
+        canvas_proposal_auto_accept: bool = False,
+        canvas_anchor_ids: tuple[str, ...] = (),
     ) -> InterviewEngineResult:
         if candidate_transcript:
             self.state.turn_index += 1
@@ -400,6 +796,8 @@ class StructuredInterviewEngine:
                 assistance=assistance,
             ),
             canvas_proposal=canvas_proposal,
+            canvas_proposal_auto_accept=canvas_proposal_auto_accept,
+            canvas_anchor_ids=canvas_anchor_ids,
         )
 
     @staticmethod

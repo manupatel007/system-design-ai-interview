@@ -192,11 +192,26 @@ function DiagramEditor() {
           aiPreviewStatus: "proposed",
         },
       }));
+      const stagedElements = [...currentElements, ...converted];
+      const autoAccept = detail.autoAccept === true;
+      const nextElements = autoAccept
+        ? acceptAiProposal(stagedElements, proposalId)
+        : stagedElements;
       instance.updateScene({
-        elements: [...currentElements, ...converted],
+        elements: nextElements,
         captureUpdate: CaptureUpdateAction.NEVER,
       });
-      setActiveProposal(proposal);
+      if (autoAccept) {
+        publish(nextElements, appState);
+        setAcceptedProposalIds((identifiers) =>
+          identifiers.includes(proposalId)
+            ? identifiers
+            : [...identifiers, proposalId],
+        );
+        setActiveProposal(null);
+      } else {
+        setActiveProposal(proposal);
+      }
       window.requestAnimationFrame(() => {
         const proposalElements = instance
           .getSceneElements()
@@ -215,7 +230,7 @@ function DiagramEditor() {
         });
       });
     },
-    [activeProposal],
+    [activeProposal, publish],
   );
 
   useEffect(() => {

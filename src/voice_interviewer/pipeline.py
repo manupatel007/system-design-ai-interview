@@ -150,6 +150,43 @@ class InterviewSessionPipeline:
             self._turn_gate.on_canvas_activity(now)
             self._schedule_response()
             return
+        if event_type == "guided.takeover.start":
+            requested_scope = _optional_string(values.get("scope"))
+            scope = (
+                requested_scope
+                if requested_scope in {"selection", "current_question", "end_to_end"}
+                else (
+                    "selection"
+                    if self._client.selected_object_ids
+                    else "current_question"
+                )
+            )
+            context = self._interview_context()
+            await self._schedule_interview_control(
+                lambda: self._interview.start_guided_takeover(context, scope=scope),
+                task_name="guided-takeover-start",
+            )
+            return
+        if event_type == "guided.takeover.command":
+            command = _optional_string(values.get("command")) or ""
+            if command not in {"continue", "why", "alternative", "take_back", "question"}:
+                await self._emit(
+                    "error",
+                    code="invalid_guided_takeover_command",
+                    message=command or "missing command",
+                )
+                return
+            context = self._interview_context()
+            question = _optional_string(values.get("question")) or ""
+            await self._schedule_interview_control(
+                lambda: self._interview.guided_takeover_command(
+                    context,
+                    command,
+                    question=question,
+                ),
+                task_name=f"guided-takeover-{command}",
+            )
+            return
         if event_type == "interview.finish":
             await self._transcription_queue.join()
             pending_transcript = self._turn_gate.force_consume() or ""
@@ -270,6 +307,29 @@ class InterviewSessionPipeline:
             name=f"interview-start-{self.session_id}",
         )
 
+    async def _schedule_interview_control(
+        self,
+        producer: Callable[[], Awaitable[InterviewEngineResult]],
+        *,
+        task_name: str,
+    ) -> None:
+        if self._closed:
+            return
+        interrupted = self._assistant_active
+        pending = self._response_task
+        if pending and not pending.done():
+            pending.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pending
+        self._response_task = None
+        self._assistant_active = False
+        if interrupted:
+            await self._emit("assistant.interrupted", reason="guided_takeover_control")
+        self._response_task = asyncio.create_task(
+            self._execute_interview(producer),
+            name=f"{task_name}-{self.session_id}",
+        )
+
     async def _respond_after(self, delay: float) -> None:
         await asyncio.sleep(delay)
         transcript = self._turn_gate.consume(time.monotonic())
@@ -314,13 +374,21 @@ class InterviewSessionPipeline:
                     ],
                 )
             if result.canvas_proposal:
+                guided_takeover = result.state.get("guidedTakeover")
+                guided_metadata = (
+                    guided_takeover if isinstance(guided_takeover, dict) else None
+                )
+                anchor_ids = result.canvas_anchor_ids or (
+                    result.assistance.object_ids if result.assistance else ()
+                )
                 await self._emit(
                     "assistant.canvas.proposal",
                     proposal=result.canvas_proposal.to_dict(),
-                    anchorObjectIds=(
-                        list(result.assistance.object_ids)
-                        if result.assistance
-                        else []
+                    anchorObjectIds=list(anchor_ids),
+                    autoAccept=result.canvas_proposal_auto_accept,
+                    guidedTakeover=guided_metadata,
+                    guidedStep=(
+                        guided_metadata.get("step") if guided_metadata else None
                     ),
                 )
             await self._emit("assistant.text.final", text=result.text)

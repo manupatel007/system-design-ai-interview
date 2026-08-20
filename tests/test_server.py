@@ -25,6 +25,10 @@ def test_health_and_static_client(mock_settings) -> None:
     assert 'participant-grid' in index.text
     assert 'transcript-feed' in index.text
     assert 'meeting-controls' in index.text
+    assert 'walk-through' in index.text
+    assert 'guided-takeover' in index.text
+    assert 'guided-continue' in index.text
+    assert 'Scoring paused' in index.text
     assert 'Structured interview state' not in index.text
     assert 'Event log' not in index.text
     assert diagram_bundle.status_code == 200

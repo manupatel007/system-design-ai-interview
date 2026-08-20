@@ -92,6 +92,38 @@
             <span class="live-indicator"><span aria-hidden="true"></span> Live</span>
           </div>
 
+          <section
+            id="guided-takeover"
+            class="guided-takeover"
+            aria-label="Guided canvas walkthrough"
+            aria-live="polite"
+            hidden
+          >
+            <div class="guided-takeover-heading">
+              <div>
+                <p class="eyebrow">Guided takeover</p>
+                <p id="guided-progress" class="guided-progress">Step 1 of 4</p>
+              </div>
+              <span class="guided-scoring">Scoring paused</span>
+            </div>
+            <h3 id="guided-title">Architecture step</h3>
+            <p id="guided-objective" class="guided-objective"></p>
+            <p id="guided-scope" class="guided-scope"></p>
+            <div id="guided-questions" class="guided-questions"></div>
+            <div class="guided-actions">
+              <button id="guided-continue" type="button" data-guided-command="continue">
+                Continue
+              </button>
+              <button id="guided-why" type="button" data-guided-command="why">Why?</button>
+              <button id="guided-alternative" type="button" data-guided-command="alternative">
+                Alternative
+              </button>
+              <button id="guided-take-back" type="button" data-guided-command="take_back">
+                Take back
+              </button>
+            </div>
+          </section>
+
           <div id="transcript-scroll" class="transcript-scroll">
             <div id="transcript-feed" class="transcript-feed" aria-live="polite">
               <p id="transcript-empty" class="empty-state">
@@ -119,6 +151,9 @@
             </div>
             <div class="canvas-actions">
               <span id="diagram-summary" class="diagram-summary">Canvas ready</span>
+              <button id="walk-through" class="quiet-button guided-start" type="button" disabled>
+                Walk me through
+              </button>
               <button id="clear" class="quiet-button" type="button">Clear canvas</button>
             </div>
           </div>

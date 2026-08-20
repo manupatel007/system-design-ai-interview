@@ -99,6 +99,52 @@ class TurnRecord:
         }
 
 
+@dataclass(slots=True)
+class GuidedTakeoverStep:
+    id: str
+    title: str
+    goal: str
+    status: str = "pending"
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "goal": self.goal,
+            "status": self.status,
+        }
+
+
+@dataclass(slots=True)
+class GuidedTakeoverState:
+    active: bool = False
+    status: str = "inactive"
+    scope: str = ""
+    objective: str = ""
+    step_index: int = 0
+    steps: list[GuidedTakeoverStep] = field(default_factory=list)
+    suggested_questions: list[str] = field(default_factory=list)
+    last_explanation: str = ""
+
+    def to_dict(self) -> dict[str, object]:
+        current = self.steps[self.step_index] if self.steps else None
+        return {
+            "active": self.active,
+            "status": self.status,
+            "scope": self.scope,
+            "objective": self.objective,
+            "floorOwner": "assistant" if self.active else "candidate",
+            "scoringPaused": self.active,
+            "currentStep": self.step_index + 1 if current else 0,
+            "totalSteps": len(self.steps),
+            "step": current.to_dict() if current else None,
+            "steps": [step.to_dict() for step in self.steps],
+            "suggestedQuestions": list(self.suggested_questions),
+            "lastExplanation": self.last_explanation,
+            "canContinue": self.active and self.status == "paused",
+        }
+
+
 def _rubric() -> dict[Competency, RubricEntry]:
     return {item: RubricEntry(competency=item) for item in Competency}
 
@@ -109,6 +155,7 @@ class InterviewState:
     assistance_policy: AssistancePolicy = AssistancePolicy.ADAPTIVE
     assistance_history: list[AssistanceTurn] = field(default_factory=list)
     canvas_proposals: list[CanvasProposal] = field(default_factory=list)
+    guided_takeover: GuidedTakeoverState = field(default_factory=GuidedTakeoverState)
     _assistance_counts: dict[str, int] = field(default_factory=dict, repr=False)
     phase: InterviewPhase = InterviewPhase.INTRODUCTION
     turn_index: int = 0
@@ -199,6 +246,7 @@ class InterviewState:
             "recentAssistance": [
                 item.to_dict() for item in self.assistance_history[-12:]
             ],
+            "guidedTakeover": self.guided_takeover.to_dict(),
             "currentQuestion": (
                 self.current_question.to_dict() if self.current_question else None
             ),
@@ -225,6 +273,7 @@ class InterviewState:
             "recentCanvasProposals": [
                 item.to_dict() for item in self.canvas_proposals[-2:]
             ],
+            "guidedTakeover": self.guided_takeover.to_dict(),
             "currentQuestion": (
                 self.current_question.to_dict() if self.current_question else None
             ),

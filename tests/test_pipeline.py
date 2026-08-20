@@ -176,6 +176,8 @@ async def test_pipeline_emits_grounded_canvas_references_before_text(
                     ),
                 ),
             ),
+            canvas_proposal_auto_accept=True,
+            canvas_anchor_ids=("api-db",),
         )
 
     pipeline = InterviewSessionPipeline(
@@ -215,6 +217,7 @@ async def test_pipeline_emits_grounded_canvas_references_before_text(
     assert reference_event["payload"]["references"][0]["objectIds"] == ["api-db"]
     assert proposal_event["payload"]["proposal"]["kind"] == "scoped"
     assert proposal_event["payload"]["anchorObjectIds"] == ["api-db"]
+    assert proposal_event["payload"]["autoAccept"] is True
 
 
 @pytest.mark.asyncio

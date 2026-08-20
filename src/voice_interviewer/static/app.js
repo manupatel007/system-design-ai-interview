@@ -27,6 +27,17 @@ const elements = {
   feedbackNotDiscussed: document.querySelector("#feedback-not-discussed"),
   diagramSummary: document.querySelector("#diagram-summary"),
   clear: document.querySelector("#clear"),
+  walkThrough: document.querySelector("#walk-through"),
+  guidedTakeover: document.querySelector("#guided-takeover"),
+  guidedProgress: document.querySelector("#guided-progress"),
+  guidedTitle: document.querySelector("#guided-title"),
+  guidedObjective: document.querySelector("#guided-objective"),
+  guidedScope: document.querySelector("#guided-scope"),
+  guidedQuestions: document.querySelector("#guided-questions"),
+  guidedContinue: document.querySelector("#guided-continue"),
+  guidedWhy: document.querySelector("#guided-why"),
+  guidedAlternative: document.querySelector("#guided-alternative"),
+  guidedTakeBack: document.querySelector("#guided-take-back"),
 };
 
 let socket;
@@ -41,6 +52,9 @@ let playbackCursor = 0;
 let latestDiagramSnapshot = window.__diagramSnapshot ?? null;
 let pendingCanvasReferences = [];
 let pendingAssistance = null;
+let assistantResponseActive = false;
+let latestGuidedTakeover = null;
+let pendingGuidedCanvasRevision = null;
 
 function setStatus(text, connected = false) {
   elements.status.textContent = text;
@@ -69,6 +83,35 @@ function send(type, payload = {}) {
   if (socket?.readyState === WebSocket.OPEN) {
     socket.send(JSON.stringify({ type, payload }));
   }
+}
+
+function setGuidedControlsDisabled() {
+  const connected = socket?.readyState === WebSocket.OPEN;
+  const guidedActive = Boolean(latestGuidedTakeover?.active);
+  const disabled = !connected || assistantResponseActive || interviewCompleted;
+  elements.walkThrough.disabled = disabled || guidedActive;
+  elements.guidedContinue.disabled =
+    disabled || !guidedActive || pendingGuidedCanvasRevision !== null;
+  elements.guidedContinue.title = pendingGuidedCanvasRevision !== null
+    ? "Waiting for the guided canvas step to sync"
+    : "";
+  for (const control of [
+    elements.guidedWhy,
+    elements.guidedAlternative,
+    elements.guidedTakeBack,
+  ]) {
+    control.disabled = disabled || !guidedActive;
+  }
+  elements.guidedQuestions
+    .querySelectorAll("button")
+    .forEach((button) => { button.disabled = disabled || !guidedActive; });
+}
+
+function sendGuidedCommand(command, question = "") {
+  if (assistantResponseActive || interviewCompleted) return;
+  assistantResponseActive = true;
+  setGuidedControlsDisabled();
+  send("guided.takeover.command", { command, question });
 }
 
 function resetTranscript() {
@@ -190,9 +233,14 @@ function clearCanvasFeedback() {
   window.dispatchEvent(new Event("diagram.feedback.clear"));
 }
 
-function showCanvasProposal(proposal, anchorObjectIds, proposalId) {
+function showCanvasProposal(
+  proposal,
+  anchorObjectIds,
+  proposalId,
+  { autoAccept = false, guidedStep = null } = {},
+) {
   window.dispatchEvent(new CustomEvent("diagram.proposal.show", {
-    detail: { proposal, anchorObjectIds, proposalId },
+    detail: { proposal, anchorObjectIds, proposalId, autoAccept, guidedStep },
   }));
 }
 
@@ -218,6 +266,8 @@ function connect() {
     elements.finish.disabled = false;
     elements.finish.textContent = "Finish interview";
     elements.disconnect.disabled = false;
+    assistantResponseActive = true;
+    setGuidedControlsDisabled();
     elements.candidate.textContent = "Microphone is off.";
     elements.interviewer.textContent = "Preparing the first question...";
     setParticipantState(elements.candidateState, "Mic off", "muted");
@@ -265,6 +315,8 @@ function connect() {
       setCardActive(elements.candidateCard, false);
     }
     if (event.type === "assistant.response.started") {
+      assistantResponseActive = true;
+      setGuidedControlsDisabled();
       pendingCanvasReferences = [];
       pendingAssistance = null;
       clearCanvasFeedback();
@@ -282,11 +334,27 @@ function connect() {
       }
     }
     if (event.type === "assistant.canvas.proposal") {
+      if (payload.autoAccept === true) {
+        pendingGuidedCanvasRevision =
+          Math.max(0, Number(latestDiagramSnapshot?.revision) || 0) + 1;
+        setGuidedControlsDisabled();
+      }
       showCanvasProposal(
         payload.proposal,
         payload.anchorObjectIds,
         "proposal-" + event.sequence,
+        {
+          autoAccept: payload.autoAccept === true,
+          guidedStep: payload.guidedStep ?? null,
+        },
       );
+    }
+    if (event.type === "canvas.synced" && pendingGuidedCanvasRevision !== null) {
+      const syncedRevision = Number(payload.revision);
+      if (Number.isFinite(syncedRevision) && syncedRevision >= pendingGuidedCanvasRevision) {
+        pendingGuidedCanvasRevision = null;
+        setGuidedControlsDisabled();
+      }
     }
     if (event.type === "assistant.canvas.references") {
       pendingCanvasReferences = normalizeCanvasReferences(payload.references);
@@ -311,10 +379,14 @@ function connect() {
       playPcm(payload.audio, payload.sampleRate);
     }
     if (event.type === "assistant.response.completed") {
+      assistantResponseActive = false;
+      setGuidedControlsDisabled();
       setParticipantState(elements.interviewerState, "Listening", "active");
       setCardActive(elements.interviewerCard, false);
     }
     if (event.type === "assistant.interrupted") {
+      assistantResponseActive = false;
+      setGuidedControlsDisabled();
       stopPlayback();
       clearCanvasFeedback();
       setParticipantState(elements.interviewerState, "Listening", "active");
@@ -323,6 +395,8 @@ function connect() {
     if (event.type === "interview.state") renderInterviewState(payload);
     if (event.type === "interview.feedback") renderFeedback(payload);
     if (event.type === "error") {
+      assistantResponseActive = false;
+      setGuidedControlsDisabled();
       stopPlayback();
       setStatus(`Error: ${payload.message ?? payload.code}`);
       setParticipantState(elements.interviewerState, "Error", "muted");
@@ -411,6 +485,12 @@ function resetConnection(status) {
   elements.disconnect.disabled = true;
   elements.candidate.textContent = "Join when you are ready to begin.";
   elements.interviewer.textContent = "Waiting for you to join.";
+  assistantResponseActive = false;
+  latestGuidedTakeover = null;
+  pendingGuidedCanvasRevision = null;
+  elements.guidedTakeover.hidden = true;
+  elements.guidedQuestions.replaceChildren();
+  setGuidedControlsDisabled();
   elements.interviewPhase.textContent = "Not started";
   elements.currentQuestion.textContent = "The current question will appear here.";
   setParticipantState(elements.candidateState, "Not connected");
@@ -471,6 +551,7 @@ function renderDiagram(snapshot) {
 
 function renderInterviewState(state) {
   interviewCompleted = Boolean(state.completed);
+  renderGuidedTakeover(state.guidedTakeover);
   elements.interviewPhase.textContent = humanize(state.phase ?? "not_started");
   elements.currentQuestion.textContent =
     state.currentQuestion?.text ?? (state.completed ? "Interview complete." : "Listening...");
@@ -482,6 +563,44 @@ function renderInterviewState(state) {
     setParticipantState(elements.interviewerState, "Complete", "active");
     setCardActive(elements.interviewerCard, false);
   }
+}
+
+function renderGuidedTakeover(takeover) {
+  latestGuidedTakeover = takeover && typeof takeover === "object" ? takeover : null;
+  const active = Boolean(latestGuidedTakeover?.active);
+  elements.guidedTakeover.hidden = !active;
+  elements.guidedQuestions.replaceChildren();
+  if (!active) {
+    setGuidedControlsDisabled();
+    return;
+  }
+
+  const step = latestGuidedTakeover.step ?? {};
+  const currentStep = Number(latestGuidedTakeover.currentStep) || 1;
+  const totalSteps = Number(latestGuidedTakeover.totalSteps) || 1;
+  elements.guidedProgress.textContent = `Step ${currentStep} of ${totalSteps}`;
+  elements.guidedTitle.textContent = step.title || "Architecture step";
+  elements.guidedObjective.textContent = step.goal || latestGuidedTakeover.objective || "";
+  elements.guidedScope.textContent = latestGuidedTakeover.objective || "";
+  elements.guidedContinue.textContent =
+    currentStep >= totalSteps && step.status === "completed"
+      ? "Finish walkthrough"
+      : "Continue";
+
+  const questions = Array.isArray(latestGuidedTakeover.suggestedQuestions)
+    ? latestGuidedTakeover.suggestedQuestions
+    : [];
+  for (const question of questions) {
+    const text = String(question ?? "").trim();
+    if (!text) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "guided-question";
+    button.textContent = text;
+    button.addEventListener("click", () => sendGuidedCommand("question", text));
+    elements.guidedQuestions.append(button);
+  }
+  setGuidedControlsDisabled();
 }
 
 function renderFeedback(feedback) {
@@ -524,6 +643,19 @@ window.addEventListener("diagram.snapshot", ({ detail }) => {
 elements.clear.addEventListener("click", () => {
   window.dispatchEvent(new Event("diagram.clear"));
 });
+elements.walkThrough.addEventListener("click", () => {
+  if (assistantResponseActive || interviewCompleted) return;
+  const selectedIds = latestDiagramSnapshot?.selectedObjectIds ?? [];
+  assistantResponseActive = true;
+  setGuidedControlsDisabled();
+  send("guided.takeover.start", {
+    scope: selectedIds.length ? "selection" : "current_question",
+  });
+});
+elements.guidedContinue.addEventListener("click", () => sendGuidedCommand("continue"));
+elements.guidedWhy.addEventListener("click", () => sendGuidedCommand("why"));
+elements.guidedAlternative.addEventListener("click", () => sendGuidedCommand("alternative"));
+elements.guidedTakeBack.addEventListener("click", () => sendGuidedCommand("take_back"));
 
 elements.connect.addEventListener("click", connect);
 elements.microphone.addEventListener("click", () => toggleMicrophone().catch((error) => setStatus(error.message)));

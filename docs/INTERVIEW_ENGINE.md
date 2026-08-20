@@ -101,6 +101,42 @@ do not increment `phaseTurns`, so repeated coaching cannot silently advance the 
 history remains visible for reflection and final feedback, while only subsequent candidate
 reasoning can become evidence.
 
+## Guided Takeover
+
+Guided Takeover is a temporary floor transfer inside the same interview, not a separate tutor
+session. It starts only from the trusted **Walk me through** control or an explicit spoken phrase
+such as "walk me through" or "show me step by step." Ambiguous uncertainty does not start it.
+
+The reducer creates persistent state with a scope, objective, current step, step statuses, suggested
+questions, and floor ownership. The initial four-step blueprint is:
+
+1. Entry and routing.
+2. Core request path.
+3. State and fast reads.
+4. Asynchronous work and operations.
+
+For each start, continue, or retry command, the planner receives the current accepted diagram,
+including `assistantLayer`, plus one trusted step goal and strict proposal limits. A valid proposal
+is auto-applied because the initial takeover is the authorization; every step is still independently
+reversible with **Undo AI**. The browser publishes the accepted assistant snapshot before the next
+user-controlled continuation, so the planner can connect later nodes to its earlier work.
+
+The interaction remains interruptible:
+
+- **Continue** advances exactly one stored step, or retries a `needs_retry` step.
+- **Why?** and suggested questions explain the current step without canvas mutation.
+- **Alternative** describes one trade-off without silently replacing the diagram.
+- **Take back** returns the floor and original question immediately.
+- Finishing the last step ends with a teach-back request rather than rubric credit.
+
+The provider gets one retry when a required canvas proposal is empty or invalid. A second failure
+pauses on the same step with deterministic recovery text and leaves the canvas untouched.
+
+While takeover is active, the reducer preserves the active question, phase, question status, and
+phase-turn count; strips evidence, rubric, assumption, decision, and topic updates; and reports
+`scoringPaused`. Successful objects stay in the assistant layer. Only the candidate's later spoken
+reasoning or candidate-authored diagram relationships can produce evidence.
+
 ## Deterministic Conversation Repairs
 
 High-confidence interaction repairs do not require a provider call:
@@ -204,6 +240,8 @@ The test suite covers:
 - Diagram visibility questions bypassing the provider and preserving the question ID.
 - Grounded canvas references filtering invented IDs and preserving event order.
 - Scoped help escalation, policy differences, question preservation, and evidence isolation.
+- Guided start/continue/completion, explanation-only controls, hand-back, retry, and evidence isolation.
+- Auto-accepted guided proposals building on the accepted assistant layer.
 - Assumption, decision, topic, evidence, and rubric updates.
 - Rejected phase skips.
 - Diagram-only evidence not upgrading a rubric.

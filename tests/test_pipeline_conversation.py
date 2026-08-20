@@ -150,6 +150,72 @@ async def test_pipeline_scopes_progressive_help_to_selected_canvas(
 
 
 @pytest.mark.asyncio
+async def test_pipeline_runs_trusted_guided_takeover_controls(mock_settings) -> None:
+    events: list[dict[str, object]] = []
+
+    async def capture(event: dict[str, object]) -> None:
+        events.append(event)
+
+    pipeline = InterviewSessionPipeline(
+        session_id="guided-takeover-controls",
+        settings=mock_settings,
+        stt=MockSTT(""),
+        llm=MockInterviewLLM(),
+        tts=InstantTTS(),
+        vad=EnergyVad(),
+        send_event=capture,
+    )
+    await pipeline.start()
+    await pipeline.handle_control(
+        {
+            "type": "session.configure",
+            "payload": {"problem": "Design a URL shortener"},
+        }
+    )
+    await _wait_for_event(events, "assistant.response.completed", count=1)
+    initial_state = _events(events, "interview.state")[-1]["payload"]
+    question_id = initial_state["currentQuestion"]["id"]
+    await pipeline.handle_control(
+        {"type": "canvas.snapshot", "payload": _diagram_snapshot()}
+    )
+
+    await pipeline.handle_control(
+        {"type": "guided.takeover.start", "payload": {"scope": "selection"}}
+    )
+    await _wait_for_event(events, "assistant.response.completed", count=2)
+
+    proposal = _events(events, "assistant.canvas.proposal")[-1]["payload"]
+    guided_state = _events(events, "interview.state")[-1]["payload"]
+    assert proposal["autoAccept"] is True
+    assert proposal["anchorObjectIds"] == ["cache"]
+    assert proposal["guidedStep"]["title"] == "Entry and routing"
+    assert proposal["guidedTakeover"]["scoringPaused"] is True
+    assert guided_state["guidedTakeover"]["active"] is True
+    assert guided_state["currentQuestion"]["id"] == question_id
+
+    proposal_count = len(_events(events, "assistant.canvas.proposal"))
+    await pipeline.handle_control(
+        {"type": "guided.takeover.command", "payload": {"command": "why"}}
+    )
+    await _wait_for_event(events, "assistant.response.completed", count=3)
+    assert len(_events(events, "assistant.canvas.proposal")) == proposal_count
+
+    await pipeline.handle_control(
+        {
+            "type": "guided.takeover.command",
+            "payload": {"command": "take_back"},
+        }
+    )
+    await _wait_for_event(events, "assistant.response.completed", count=4)
+    final_state = _events(events, "interview.state")[-1]["payload"]
+    assert final_state["guidedTakeover"]["active"] is False
+    assert final_state["guidedTakeover"]["status"] == "handed_back"
+    assert final_state["currentQuestion"]["id"] == question_id
+    assert final_state["evidenceCount"] == 0
+    await pipeline.close()
+
+
+@pytest.mark.asyncio
 async def test_finish_waits_for_and_includes_final_transcript(mock_settings) -> None:
     events: list[dict[str, object]] = []
     llm = CapturingMockLLM()

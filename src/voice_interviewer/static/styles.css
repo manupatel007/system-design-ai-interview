@@ -401,6 +401,111 @@ h2 {
   box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.08);
 }
 
+.guided-takeover {
+  flex: 0 0 auto;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgba(168, 85, 247, 0.3);
+  background: linear-gradient(145deg, rgba(88, 28, 135, 0.2), rgba(49, 46, 129, 0.12));
+}
+
+.guided-takeover-heading,
+.guided-actions,
+.guided-questions {
+  display: flex;
+  align-items: center;
+}
+
+.guided-takeover-heading {
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.guided-progress {
+  margin: 0;
+  color: #c4b5fd;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.guided-scoring {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(251, 191, 36, 0.34);
+  border-radius: 999px;
+  color: #fde68a;
+  background: rgba(146, 64, 14, 0.22);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.guided-takeover h3 {
+  margin: 11px 0 5px;
+  color: #f5f3ff;
+  font-size: 0.82rem;
+}
+
+.guided-objective,
+.guided-scope {
+  margin-bottom: 0;
+  color: #c4cddd;
+  font-size: 0.69rem;
+  line-height: 1.45;
+}
+
+.guided-scope {
+  margin-top: 5px;
+  color: #818da0;
+}
+
+.guided-questions,
+.guided-actions {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.guided-questions {
+  margin-top: 11px;
+}
+
+.guided-actions {
+  margin-top: 9px;
+}
+
+.guided-question,
+.guided-actions button {
+  padding: 6px 8px;
+  border: 1px solid rgba(167, 139, 250, 0.38);
+  border-radius: 8px;
+  cursor: pointer;
+  color: #ddd6fe;
+  background: rgba(91, 33, 182, 0.2);
+  font-size: 0.64rem;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.guided-question {
+  text-align: left;
+}
+
+.guided-actions button:last-child {
+  border-color: #394250;
+  color: #aeb9c8;
+  background: #1c222b;
+}
+
+.guided-question:hover:not(:disabled),
+.guided-actions button:hover:not(:disabled) {
+  border-color: rgba(196, 181, 253, 0.75);
+  filter: brightness(1.12);
+}
+
+.guided-question:disabled,
+.guided-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .transcript-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -582,6 +687,12 @@ h2 {
   color: #b9c4d2;
   background: #1a1f27;
   font-size: 0.7rem;
+}
+
+.guided-start {
+  border-color: rgba(168, 85, 247, 0.52);
+  color: #e9d5ff;
+  background: rgba(107, 33, 168, 0.25);
 }
 
 .quiet-button:hover,

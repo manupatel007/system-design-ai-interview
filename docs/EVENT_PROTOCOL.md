@@ -155,6 +155,86 @@ Requests evidence-backed completion. The browser stops and flushes the microphon
 }
 ```
 
+### `guided.takeover.start`
+
+Explicitly authorizes a persistent, multi-step teaching walkthrough. The browser sends it from
+**Walk me through**; recognized spoken triggers enter the same server-owned engine path.
+
+```json
+{
+  "type": "guided.takeover.start",
+  "payload": {
+    "scope": "selection"
+  }
+}
+```
+
+`scope` may be `selection`, `current_question`, or `end_to_end`. Missing or invalid scope falls
+back to the validated current selection when one exists, otherwise the current question. The
+first bounded step is generated immediately.
+
+### `guided.takeover.command`
+
+Controls an active walkthrough without re-authorizing each canvas change:
+
+```json
+{
+  "type": "guided.takeover.command",
+  "payload": {
+    "command": "continue",
+    "question": ""
+  }
+}
+```
+
+Commands are `continue`, `why`, `alternative`, `question`, and `take_back`. `question` carries the
+text of a suggested-question chip. `why`, `question`, and `alternative` explain the current step
+without advancing or changing the canvas. `continue` retries a failed step or advances exactly
+one step. `take_back` returns the floor while preserving the interview's original phase and
+question. Invalid commands emit `invalid_guided_takeover_command`.
+
+The pipeline cancels and awaits an older response task before scheduling either trusted control,
+so two planners cannot mutate the same session state concurrently. If playback was active, the
+server emits `assistant.interrupted` with reason `guided_takeover_control` first.
+
+## Guided Takeover State
+
+Every guided result includes authoritative state under `interview.state.payload.guidedTakeover`:
+
+```json
+{
+  "active": true,
+  "status": "paused",
+  "scope": "selection",
+  "objective": "Explain and extend the selected canvas area for high-level architecture.",
+  "floorOwner": "assistant",
+  "scoringPaused": true,
+  "currentStep": 2,
+  "totalSteps": 4,
+  "step": {
+    "id": "core-request-path",
+    "title": "Core request path",
+    "goal": "Add the main application boundary and label the synchronous request path.",
+    "status": "completed"
+  },
+  "steps": [],
+  "suggestedQuestions": ["Why is this the right service boundary?"],
+  "lastExplanation": "Step 2, Core request path: ...",
+  "canContinue": true
+}
+```
+
+A successful guided step emits one `assistant.canvas.proposal` with `autoAccept: true`; the browser
+applies it immediately, publishes the resulting `assistantLayer` snapshot, and keeps **Undo AI**
+available. The next step therefore sees and can extend earlier AI work. `why`, `alternative`, and
+question commands emit no proposal. An empty or invalid provider proposal is retried once; a
+second failure leaves the canvas untouched and marks the step `needs_retry`.
+
+The active question, phase, phase-turn counter, evidence ledger, rubric, assumptions, decisions,
+and covered topics remain frozen for the whole walkthrough. AI-authored steps are teaching
+material, never candidate evidence. Completing or taking back the walkthrough restores
+`floorOwner: candidate` and `scoringPaused: false`.
+
 ## Scoped Practice Assistance
 
 An explicit spoken help request runs the planner in `help` mode. Before the matching text event,
@@ -228,7 +308,6 @@ An explicit draw-help request may produce an `assistant.canvas.proposal` event a
 {
   "type": "assistant.canvas.proposal",
   "payload": {
-    "proposalId": "proposal-42",
     "proposal": {
       "kind": "scoped",
       "title": "Add a cache lookup",
@@ -238,12 +317,18 @@ An explicit draw-help request may produce an `assistant.canvas.proposal` event a
         {"id": "cache-flow", "sourceId": "api", "targetId": "cache", "label": "lookup"}
       ]
     },
-    "anchorObjectIds": ["api"]
+    "anchorObjectIds": ["api"],
+    "autoAccept": false,
+    "guidedTakeover": null,
+    "guidedStep": null
   }
 }
 ```
 
-`kind` is `scoped` for a bounded suggestion and `reference` for a complete reference architecture.
+The browser derives a local proposal ID from the event sequence. `kind` is `scoped` for a bounded
+suggestion and `reference_architecture` for a complete reference architecture. Guided steps set
+`autoAccept` to `true` and include the matching guided state and current-step metadata; ordinary
+help proposals keep it `false` and retain the Keep/Reject preview.
 Scoped proposals may add only new nodes or edges and must reference existing IDs for anchors. A
 reference request explicitly overrides the strictness policy for that turn, but still remains
 non-evidentiary and additive. The reducer validates every proposal against the accepted diagram,
@@ -269,6 +354,17 @@ without creating candidate canvas activity or advancing the interview turn gate.
     "turnIndex": 3,
     "assistancePolicy": "adaptive",
     "assistanceCount": 1,
+    "guidedTakeover": {
+      "active": false,
+      "status": "inactive",
+      "floorOwner": "candidate",
+      "scoringPaused": false,
+      "currentStep": 0,
+      "totalSteps": 0,
+      "step": null,
+      "suggestedQuestions": [],
+      "canContinue": false
+    },
     "recentAssistance": [
       {
         "policy": "adaptive",
@@ -349,6 +445,7 @@ Rubric levels are coverage markers (`not_observed`, `some_evidence`, or `demonst
 | `assistant.response.started` | none | Turn gate yielded the floor |
 | `assistant.assistance` | policy, disclosure level, request index, scope, object IDs | Mark an explicit scoped-help response |
 | `assistant.canvas.references` | validated reference kind, label, and object IDs | Highlight exact areas discussed by the response |
+| `assistant.canvas.proposal` | bounded proposal, anchors, auto-accept flag, optional guided metadata | Preview ordinary help or apply an authorized guided step |
 | `assistant.text.final` | `text` | Interviewer response text |
 | `assistant.audio.chunk` | audio, encoding, sample rate, channels, `chunkIndex` | Sequential playable PCM audio |
 | `assistant.response.completed` | none | All response output was emitted |
@@ -396,6 +493,7 @@ The pipeline tracks whether the response was active, but it does not yet report 
 | `invalid_json` | Client control event could not be parsed | Log and continue |
 | `unsupported_event` | Unknown client event type | Fix client/version mismatch |
 | `invalid_diagram` | Snapshot schema or references are invalid | Keep the last accepted scene and inspect the message |
+| `invalid_guided_takeover_command` | Guided command is missing or unsupported | Keep current step and send a supported command |
 | `transcription_failed` | Local STT inference failed | Offer retry or text input |
 | `response_failed` | LLM or TTS stage failed | Preserve transcript and offer retry |
 
