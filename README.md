@@ -1,212 +1,192 @@
-# Local AI System Design Interviewer
+﻿# AI System Design Interviewer
 
-Runnable local-first AI system-design interview workspace. Speech recognition, voice activity detection, and speech synthesis run locally; the interviewer planner remains mocked by default. A per-session conversation engine tracks the active question, phases, assumptions, decisions, evidence, rubric coverage, and final feedback while Excalidraw supplies validated diagram semantics.
+> Practice high-level and low-level design interviews with an AI interviewer that listens, watches your architecture canvas, and helps you reason—not just recite answers.
 
-## Pipeline
+<p align="center">
+  <img src="docs/assets/interview-loop.gif" alt="Starting a live AI system-design interview" width="920" />
+</p>
+
+[![Research project](https://img.shields.io/badge/status-research--only-orange)](#project-status)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](#quick-start)
+
+## Watch the voice loop
+
+<p align="center">
+  <a href="docs/assets/end-to-end-voice-demo.mp4">
+    <img src="docs/assets/end-to-end-voice-demo-poster.jpg" alt="Watch the narrated end-to-end voice interview demo" width="920" />
+  </a>
+  <br />
+  <a href="docs/assets/end-to-end-voice-demo.mp4"><strong>▶ Watch the 90-second narrated demo with audio</strong></a>
+</p>
+
+The walkthrough uses the real meeting UI and Guided Takeover state machine. Piper voices the
+interviewer and Kokoro voices the candidate locally. The dialogue is scripted and post-synchronized,
+so this demonstrates the complete interaction design rather than live STT or latency performance.
+
+## Why this exists
+
+Most interview practice tools evaluate text. System design interviews are different: you speak, draw, revise assumptions, label flows, and defend trade-offs in real time. This project explores an AI interviewer that keeps those modalities in one loop:
+
+- **Talk naturally** while local VAD and speech recognition detect complete turns.
+- **Draw in Excalidraw** while the interviewer reads structured diagram semantics.
+- **Get grounded feedback** tied to the exact component or relationship under discussion.
+- **Switch between interview, hint, tutor, and guided-takeover styles** without losing the thread.
+- **Run voice locally** with faster-whisper, Silero VAD, and Piper; use Databricks or Azure AI Foundry for the planner when desired.
+
+## See it in action
+
+### Ask the AI to sketch with you
+
+Suggestions arrive as purple, reviewable previews. Keep, reject, edit, or undo them without turning AI-authored work into candidate evidence.
+
+<p align="center">
+  <img src="docs/assets/canvas-help.gif" alt="Reviewing and accepting an AI canvas suggestion" width="920" />
+</p>
+
+### Let it teach one step at a time
+
+Guided Takeover pauses scoring and builds a reference path in bounded steps. Ask why, explore an alternative, continue, or take control back whenever the idea clicks.
+
+<p align="center">
+  <img src="docs/assets/guided-takeover.gif" alt="AI guided takeover building an architecture step by step" width="920" />
+</p>
+
+A good demo flow is: clarify requirements → draw the first architecture → ask for a bounded hint → refine the diagram → receive final feedback.
+
+## Architecture
 
 ```text
-Browser microphone (16 kHz PCM)
-  -> Silero VAD
-  -> faster-whisper base.en
-  + structured Excalidraw snapshot
-  -> canvas-aware turn gate
-  -> stateful interview engine and evidence policy
-  -> mock, Databricks, or Azure Foundry structured planner
-  -> Piper en_US-lessac-medium local TTS
-  -> browser audio playback
+Browser microphone + Excalidraw
+              │
+              ▼
+       WebSocket session
+              │
+      Silero VAD + turn gate
+              │
+      faster-whisper base.en
+              │
+   stateful interview engine
+   + structured canvas snapshot
+              │
+     mock / Databricks / Azure
+              │
+        Piper local TTS
+              │
+       browser audio playback
 ```
 
-The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Piper `en_US-lessac-medium` artifacts. Ready STT and TTS models load once during server startup and are shared across sessions. Piper emits sentence chunks that the browser queues for continuous playback. Kokoro remains available as an alternate backend, and `--mock` remains available for dependency-free protocol tests. No API credentials are required unless a remote LLM provider is selected.
+The repository is intentionally modular: swap the LLM provider, speech backend, or canvas client without rewriting the interview engine.
 
-> **Research-only voice:** [`piper-tts 1.7`](https://pypi.org/project/piper-tts/) is GPL-3.0-or-later. The pinned [Lessac model card](https://huggingface.co/rhasspy/piper-voices/blob/f5a6e9094787fd865d65cb024472f977f9c542b5/en/en_US/lessac/medium/MODEL_CARD) links to a [dataset license](https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html) limited to research use that excludes commercial speech products. This repository intentionally uses it only for research. Select a separately approved runtime and voice before commercial deployment or redistribution.
+## Quick start
 
-## Requirements
+### 1. Install prerequisites
 
-- Windows PowerShell
+- Python 3.11+
 - [`uv`](https://docs.astral.sh/uv/)
-- A modern CPU with approximately 2 GB free RAM for the base configuration
-- Microphone access in the browser
-- Node.js 22+ and pnpm only when rebuilding the checked-in canvas bundle
+- A modern browser with microphone permissions
+- Node.js 22+ and `pnpm` only if you rebuild the frontend bundle
 
-Python dependencies, uv caches, Hugging Face caches, temporary downloads, model weights, and the virtual environment are all redirected beneath this project on the `F:` drive by `scripts/env.ps1`.
+The included scripts work on Windows PowerShell. The Python package and model caches live under the repository by default; no hard-coded drive or machine path is required.
 
-## Bootstrap
+### 2. Bootstrap dependencies and local models
 
 ```powershell
+# Windows PowerShell
 .\scripts\bootstrap.ps1
 ```
 
-This command:
-
-1. Creates `.venv` in the project.
-2. Installs dependencies with uv using `.cache\uv`.
-3. Downloads Silero VAD to `.models\silero-vad`.
-4. Downloads faster-whisper `base.en` to `.models\faster-whisper-base.en`.
-5. Downloads the pinned Piper Lessac voice to `.models\piper`.
-6. Downloads Kokoro INT8 and its voice pack as an alternate backend.
-7. Downloads a small pinned speech sample to `.cache\test-assets`.
-8. Prints a sanitized readiness report.
-
-To install dependencies without model weights:
+This installs the project with `uv`, then downloads the pinned Silero VAD, `base.en` Whisper, Piper voice, and optional Kokoro artifacts. To install Python dependencies without downloading models:
 
 ```powershell
 .\scripts\bootstrap.ps1 -SkipModels
 ```
 
-## Run
+On macOS/Linux, run the equivalent commands manually:
 
-For an immediate end-to-end mock demonstration:
+```bash
+uv sync
+uv run python scripts/download_models.py --all
+```
+
+### 3. Start the app
+
+Dependency-free UI smoke test:
 
 ```powershell
 . .\scripts\env.ps1
 uv run voice-interviewer serve --mock
 ```
 
-For local Silero VAD, `base.en` transcription, Piper speech, and the mock interviewer LLM:
+Full local voice pipeline with the mock interviewer planner:
 
 ```powershell
 . .\scripts\env.ps1
 uv run voice-interviewer serve
 ```
 
-Open `http://127.0.0.1:8000` and join. The interviewer opens the requirements phase automatically. The meeting-style workspace keeps candidate and interviewer cards at the top, a scrollable conversation transcript on the left, and the Excalidraw architecture canvas as the primary surface. Interview setup remains available from the compact header menu, and final feedback appears beneath the transcript. Use **Finish interview** after your last explanation.
+Open **http://127.0.0.1:8000**, allow microphone access, and join an interview. The workspace puts the candidate and interviewer at the top, transcript on the left, and the architecture canvas front and center.
 
-### Ask the AI What To Draw
+## Try these interactions
 
-Canvas proposals are model-driven and additive: the interviewer can suggest missing components,
-labelled relationships, or a complete reference architecture without overwriting candidate work.
+1. Say: “Let’s clarify the requirements.”
+2. Draw a client, service, datastore, and labelled arrows.
+3. Ask: “What should I draw next?”
+4. Ask: “Show me a complete reference architecture.”
+5. Toggle help strictness or request a guided takeover.
+6. Finish the interview to see evidence-based feedback.
 
-1. Draw and optionally select one or more components.
-2. Say **?What should I draw here??** for a bounded, selection-scoped suggestion, or **?Show me a complete reference architecture?** for a reference layout.
-3. Review the purple ghost objects and the explanation in the **AI canvas** panel.
-4. Choose **Keep suggestion / Keep reference** or **Reject**. Kept AI objects remain editable.
+AI canvas changes appear as reviewable purple previews. You decide what to keep; candidate-authored elements remain the source of interview evidence.
 
-Proposed objects carry `aiPreview` metadata and remain outside the semantic snapshot until the
-candidate chooses **Keep**. Kept objects enter a separate `assistantLayer`, so later help can build
-on earlier AI suggestions while candidate-authored nodes and edges remain the only diagram objects
-eligible for evidence. The reducer validates IDs, limits size, and only permits proposals when the
-candidate explicitly asks for help. Grounded feedback remains separate: numbered purple outlines
-identify exact existing nodes or edges when the interviewer explains a diagram issue.
+## Configure a remote planner (optional)
 
-### Guided Takeover
+The default planner is mock, so the project runs without credentials. For a real planner, copy the relevant variables from `.env.example` into your shell environment and choose one backend:
 
-Use Guided Takeover when you want the interviewer to take the floor and teach through the canvas
-one reversible step at a time:
+```text
+VOICE_LLM_BACKEND=databricks
+# or
+VOICE_LLM_BACKEND=azure_foundry
+```
 
-1. Reach a design question and optionally select the area you want extended.
-2. Click **Walk me through** beside the canvas controls, or say **"Walk me through this design."**
-3. The interviewer explains and automatically applies one bounded purple AI step. The panel shows
-   the current step, objective, suggested questions, and **Scoring paused**.
-4. Choose **Continue**, **Why?**, **Alternative**, a suggested-question chip, or **Take back**.
-5. After the last step, explain the request path and trade-offs in your own words to resume the
-   original interview question.
+See `docs/LLM_PROVIDERS.md` for endpoint formats, authentication, retries, streaming, and structured-output requirements. Keep credentials server-side and never commit them.
 
-The default walkthrough covers entry/routing, the core request path, state and fast reads, then
-asynchronous work and operations. One explicit takeover authorization permits its later steps to
-apply automatically; the user does not need to approve every canvas mutation. **Undo AI** removes
-an applied step. Every generated component remains in `assistantLayer`, is available to the next
-walkthrough step, and is excluded from candidate evidence and rubric coverage.
+## Project status
 
-### Ask for Scoped Help
+This is a research prototype, not a production hiring tool. The most valuable feedback is about interview realism, diagram grounding, latency, and learning outcomes. Expect rough edges and breaking changes while the interaction model evolves.
 
-Choose a **Practice support** policy in **Interview setup** before joining:
+## Development
 
-- **Strict** always returns a Socratic nudge.
-- **Adaptive** returns a nudge, then a concept, then a bounded example when help is repeated.
-- **Guided** starts with a concept and moves to a bounded example.
+```bash
+uv run pytest
+uv run ruff check .
+```
 
-Ask naturally with phrases such as "I need a hint", "Can you give me more help?", or "Show
-me an example." If canvas objects are selected, help is scoped to those objects and receives a
-matching purple focus outline. Otherwise it stays scoped to the active question. A transcript
-badge identifies each hint, concept, or worked example.
-
-Assistance does not close the question, advance the phase, increment the phase escape counter, or
-create candidate evidence. Selecting a different canvas area starts a fresh help sequence.
-
-## Rebuild the Canvas UI
-
-Runtime users do not need Node or internet access because the production bundle is checked in. After changing `frontend/`, rebuild and test it with:
+After changing `frontend/`, rebuild the checked-in bundle:
 
 ```powershell
 .\scripts\build_frontend.ps1
 ```
 
-The pnpm store and cache remain beneath `.cache` on the `F:` workspace.
-
-## Validate Local STT
+Regenerate the README media from the deterministic mock experience with Edge or Chrome installed:
 
 ```powershell
-. .\scripts\env.ps1
-uv run python scripts/smoke_transcribe.py
+uv run python scripts/capture_readme_demos.py
+uv run python scripts/capture_end_to_end_demo.py
 ```
 
-The smoke test runs the local `base.en` adapter against the pinned JFK WAV sample. It makes no paid API calls.
+Useful deeper dives:
 
-## Validate Local TTS
+- `docs/VOICE_PIPELINE.md` — local audio pipeline and operational limits
+- `docs/STT_MEMORY_FINDINGS.md` — diagnosing Windows native allocation failures
+- `docs/TTS_LATENCY_FINDINGS.md` — why speech can start several seconds late
+- `docs/STRUCTURED_CANVAS.md` — semantic Excalidraw representation
+- `docs/INTERVIEW_ENGINE.md` — phases, evidence, and progression
+- `docs/LLM_PROVIDERS.md` — Databricks and Azure AI Foundry adapters
+- `docs/EVALUATION_PLAN.md` — research metrics and test scenarios
 
-```powershell
-. .\scripts\env.ps1
-uv run python scripts/smoke_tts.py
-```
+## Contributing
 
-This creates `.runtime\tts-smoke.wav` with the configured real local TTS backend. A ready Piper model is loaded during server startup and reused across sessions.
+Ideas, issue reports, and experiments are welcome. Please include your OS, Python version, backend settings, and a short reproduction when reporting a bug. For larger changes, open an issue first so the interaction contract stays coherent.
 
-With the normal server running, exercise one complete real voice turn with:
+## License and voice-model notice
 
-```powershell
-uv run python scripts/smoke_voice_turn.py
-```
-
-## Tests and Lint
-
-```powershell
-. .\scripts\env.ps1
-uv run pytest
-uv run ruff check .
-```
-
-## Configuration
-
-Copy `.env.example` values into your process environment as needed. The server does not automatically read `.env`, preventing an accidental secret load.
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `VOICE_STT_BACKEND` | `faster-whisper` | `faster-whisper` or `mock` |
-| `VOICE_STT_MODEL` | `base.en` | Local Whisper model name |
-| `VOICE_STT_DEVICE` | `cpu` | CTranslate2 device |
-| `VOICE_STT_COMPUTE_TYPE` | `int8` | Low-memory CPU compute type |
-| `VOICE_STT_CPU_THREADS` | `2` | Serialized STT worker threads; higher values increase scratch memory |
-| `VOICE_VAD_BACKEND` | `silero` | `silero` or development-only `energy` |
-| `VOICE_LLM_BACKEND` | `mock` | `mock`, `databricks`, or `azure_foundry` |
-| `VOICE_LLM_TIMEOUT_SECONDS` | `30` | Remote provider request timeout |
-| `VOICE_LLM_MAX_RETRIES` | `2` | Bounded transient-failure retries |
-| `VOICE_LLM_STREAMING` | `false` | Consume provider SSE through the common gateway |
-| `VOICE_TTS_BACKEND` | `piper` | `piper`, `kokoro`, or `mock` |
-| `VOICE_PIPER_MODEL_PATH` | `.models/piper/en_US-lessac-medium.onnx` | Piper ONNX voice path inside the workspace |
-| `VOICE_PIPER_CONFIG_PATH` | `.models/piper/en_US-lessac-medium.onnx.json` | Matching Piper voice configuration |
-| `VOICE_TTS_VOICE` | `af_heart` | Kokoro-only voice key |
-| `VOICE_TTS_LANGUAGE` | `en-us` | Kokoro-only phonemizer language |
-| `VOICE_TTS_SPEED` | `1.0` | Backend-neutral speech speed from `0.5` to `2.0` |
-| `VOICE_VAD_MIN_SPEECH_MS` | `192` | Sustained speech required before opening an utterance |
-| `VOICE_VAD_MIN_SILENCE_MS` | `1200` | Patient speech endpointing for interviews |
-| `VOICE_CANVAS_QUIET_MS` | `1500` | Canvas inactivity required before a response |
-
-Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databricks and Azure AI Foundry endpoint, credential, retry, streaming, and structured-output configuration. Never commit credentials or paste them into the browser; provider contract tests use mock HTTP transports only.
-
-## Current Boundaries
-
-- Whisper partial transcripts are intentionally not fed to the LLM. Only finalized utterances trigger reasoning.
-- `base.en` is English-only and must be evaluated on expected accents and technical vocabulary.
-- On Windows, `mkl_malloc` means RAM/page-file commit exhaustion. STT work is serialized and cancellation-drained, but the host still needs several GB of safe commit headroom.
-- Silero VAD determines speech boundaries; the separate turn gate decides whether the candidate has yielded the floor.
-- Diagram roles are deterministic label heuristics unless an element supplies an explicit `customData.systemDesignRole`.
-- Visual style and exact geometry remain in session state but are intentionally omitted from provider prompts.
-- Live rubric levels represent evidence coverage, not a final hiring score; diagram shapes alone cannot upgrade them.
-- Interview state is in memory only and is discarded when the WebSocket session closes.
-- Provider plans require strict structured-output support; malformed plans fail without mutating state.
-- Guided Takeover currently uses a four-step generic blueprint; **Alternative** explains a branch but does not redraw or fork canvas history.
-- Piper emits one PCM chunk per sentence; the browser schedules chunks sequentially and barge-in clears queued playback.
-- Kokoro remains a full-response compatibility backend and does not provide low-latency sentence streaming.
-- Raw audio is held only for the active utterance and is not persisted.
-
-See `docs/VOICE_PIPELINE.md`, `docs/STT_MEMORY_FINDINGS.md`, `docs/TTS_LATENCY_FINDINGS.md`, `docs/STRUCTURED_CANVAS.md`, `docs/INTERVIEW_ENGINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.
+Code is released under the repository license. The bundled Piper voice is included for research use under its upstream model and dataset terms; review those terms before redistribution or commercial use.
