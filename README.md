@@ -16,7 +16,7 @@ Browser microphone (16 kHz PCM)
   -> browser audio playback
 ```
 
-The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Piper `en_US-lessac-medium` artifacts. Piper emits sentence chunks that the browser queues for continuous playback. Kokoro remains available as an alternate backend, and `--mock` remains available for dependency-free protocol tests. No API credentials are required unless a remote LLM provider is selected.
+The normal mode uses pinned Silero ONNX, `Systran/faster-whisper-base.en`, and Piper `en_US-lessac-medium` artifacts. Ready STT and TTS models load once during server startup and are shared across sessions. Piper emits sentence chunks that the browser queues for continuous playback. Kokoro remains available as an alternate backend, and `--mock` remains available for dependency-free protocol tests. No API credentials are required unless a remote LLM provider is selected.
 
 > **Research-only voice:** [`piper-tts 1.7`](https://pypi.org/project/piper-tts/) is GPL-3.0-or-later. The pinned [Lessac model card](https://huggingface.co/rhasspy/piper-voices/blob/f5a6e9094787fd865d65cb024472f977f9c542b5/en/en_US/lessac/medium/MODEL_CARD) links to a [dataset license](https://www.cstr.ed.ac.uk/projects/blizzard/2013/lessac_blizzard2013/license.html) limited to research use that excludes commercial speech products. This repository intentionally uses it only for research. Select a separately approved runtime and voice before commercial deployment or redistribution.
 
@@ -173,6 +173,9 @@ Copy `.env.example` values into your process environment as needed. The server d
 | --- | --- | --- |
 | `VOICE_STT_BACKEND` | `faster-whisper` | `faster-whisper` or `mock` |
 | `VOICE_STT_MODEL` | `base.en` | Local Whisper model name |
+| `VOICE_STT_DEVICE` | `cpu` | CTranslate2 device |
+| `VOICE_STT_COMPUTE_TYPE` | `int8` | Low-memory CPU compute type |
+| `VOICE_STT_CPU_THREADS` | `2` | Serialized STT worker threads; higher values increase scratch memory |
 | `VOICE_VAD_BACKEND` | `silero` | `silero` or development-only `energy` |
 | `VOICE_LLM_BACKEND` | `mock` | `mock`, `databricks`, or `azure_foundry` |
 | `VOICE_LLM_TIMEOUT_SECONDS` | `30` | Remote provider request timeout |
@@ -194,6 +197,7 @@ Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databr
 
 - Whisper partial transcripts are intentionally not fed to the LLM. Only finalized utterances trigger reasoning.
 - `base.en` is English-only and must be evaluated on expected accents and technical vocabulary.
+- On Windows, `mkl_malloc` means RAM/page-file commit exhaustion. STT work is serialized and cancellation-drained, but the host still needs several GB of safe commit headroom.
 - Silero VAD determines speech boundaries; the separate turn gate decides whether the candidate has yielded the floor.
 - Diagram roles are deterministic label heuristics unless an element supplies an explicit `customData.systemDesignRole`.
 - Visual style and exact geometry remain in session state but are intentionally omitted from provider prompts.
@@ -205,4 +209,4 @@ Remote providers are disabled by default. See `docs/LLM_PROVIDERS.md` for Databr
 - Kokoro remains a full-response compatibility backend and does not provide low-latency sentence streaming.
 - Raw audio is held only for the active utterance and is not persisted.
 
-See `docs/VOICE_PIPELINE.md`, `docs/TTS_LATENCY_FINDINGS.md`, `docs/STRUCTURED_CANVAS.md`, `docs/INTERVIEW_ENGINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.
+See `docs/VOICE_PIPELINE.md`, `docs/STT_MEMORY_FINDINGS.md`, `docs/TTS_LATENCY_FINDINGS.md`, `docs/STRUCTURED_CANVAS.md`, `docs/INTERVIEW_ENGINE.md`, `docs/LLM_PROVIDERS.md`, `docs/EVENT_PROTOCOL.md`, and `docs/EVALUATION_PLAN.md` for implementation details and acceptance criteria.

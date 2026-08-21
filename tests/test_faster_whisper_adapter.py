@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from dataclasses import dataclass
 
 import numpy as np
 import pytest
 
 from voice_interviewer.config import PROJECT_ROOT
+from voice_interviewer.models import Transcript
+from voice_interviewer.stt import faster_whisper as faster_whisper_module
 from voice_interviewer.stt.faster_whisper import FasterWhisperSTT
 
 
@@ -38,6 +42,143 @@ def _transcriber(segments: list[FakeSegment]) -> tuple[FasterWhisperSTT, FakeWhi
     model = FakeWhisperModel(segments)
     transcriber._model = model
     return transcriber, model
+
+
+@pytest.mark.asyncio
+async def test_cancelled_load_finishes_once_and_keeps_model(monkeypatch) -> None:
+    transcriber = FasterWhisperSTT(
+        model_name="base.en",
+        model_root=PROJECT_ROOT / ".models",
+    )
+    started = threading.Event()
+    release = threading.Event()
+    model = object()
+    calls = 0
+
+    def load_sync():
+        nonlocal calls
+        calls += 1
+        started.set()
+        release.wait(1)
+        return model
+
+    monkeypatch.setattr(transcriber, "_load_sync", load_sync)
+    load_task = asyncio.create_task(transcriber.load())
+    assert await asyncio.to_thread(started.wait, 1)
+
+    load_task.cancel()
+    await asyncio.sleep(0)
+    assert not load_task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await load_task
+
+    assert transcriber._model is model
+    await transcriber.load()
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_transcriptions_are_serialized_across_callers(monkeypatch) -> None:
+    transcriber, _ = _transcriber([])
+    started = threading.Event()
+    release = threading.Event()
+    guard = threading.Lock()
+    calls = 0
+    active = 0
+    peak = 0
+
+    def transcribe_sync(audio, prompt):
+        nonlocal active, calls, peak
+        with guard:
+            calls += 1
+            active += 1
+            peak = max(peak, active)
+            started.set()
+        release.wait(1)
+        with guard:
+            active -= 1
+        return Transcript(text="ok", language="en", duration_seconds=1.0)
+
+    monkeypatch.setattr(transcriber, "_transcribe_sync", transcribe_sync)
+    audio = np.zeros(16_000, dtype=np.float32)
+    first = asyncio.create_task(transcriber.transcribe(audio))
+    second = asyncio.create_task(transcriber.transcribe(audio))
+    assert await asyncio.to_thread(started.wait, 1)
+    await asyncio.sleep(0.02)
+
+    assert calls == 1
+    assert peak == 1
+    release.set()
+    results = await asyncio.gather(first, second)
+    assert [result.text for result in results] == ["ok", "ok"]
+    assert calls == 2
+    assert peak == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_transcription_drains_before_next_caller(monkeypatch) -> None:
+    transcriber, _ = _transcriber([])
+    started = threading.Event()
+    release = threading.Event()
+    guard = threading.Lock()
+    calls = 0
+    active = 0
+    peak = 0
+
+    def transcribe_sync(audio, prompt):
+        nonlocal active, calls, peak
+        with guard:
+            calls += 1
+            active += 1
+            peak = max(peak, active)
+            started.set()
+        release.wait(1)
+        with guard:
+            active -= 1
+        return Transcript(text="ok", language="en", duration_seconds=1.0)
+
+    monkeypatch.setattr(transcriber, "_transcribe_sync", transcribe_sync)
+    audio = np.zeros(16_000, dtype=np.float32)
+    cancelled = asyncio.create_task(transcriber.transcribe(audio))
+    assert await asyncio.to_thread(started.wait, 1)
+    cancelled.cancel()
+    await asyncio.sleep(0)
+    next_call = asyncio.create_task(transcriber.transcribe(audio))
+    await asyncio.sleep(0.02)
+
+    assert calls == 1
+    assert peak == 1
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    assert (await next_call).text == "ok"
+    assert calls == 2
+    assert peak == 1
+
+
+@pytest.mark.asyncio
+async def test_mkl_allocation_failure_has_actionable_memory_context(monkeypatch) -> None:
+    transcriber, _ = _transcriber([])
+
+    def fail_transcription(audio, prompt):
+        raise RuntimeError("mkl_malloc: failed to allocate memory")
+
+    monkeypatch.setattr(transcriber, "_transcribe_sync", fail_transcription)
+    monkeypatch.setattr(
+        faster_whisper_module,
+        "_windows_memory_summary",
+        lambda: (
+            "Windows reports 900 MB available physical memory and 1,024 MB available "
+            "commit against a 32,000 MB commit limit. "
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="1,024 MB available commit") as captured:
+        await transcriber.transcribe(np.zeros(16_000, dtype=np.float32))
+
+    assert "Windows page file" in str(captured.value)
+    assert isinstance(captured.value.__cause__, RuntimeError)
 
 
 def test_glossary_is_sent_as_hotwords_not_initial_prompt() -> None:

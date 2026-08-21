@@ -40,6 +40,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        load_stt = getattr(services.stt, "load", None)
+        if load_stt is not None and getattr(services.stt, "ready", True):
+            await load_stt()
         load_tts = getattr(services.tts, "load", None)
         if load_tts is not None and getattr(services.tts, "ready", False):
             await load_tts()
@@ -65,6 +68,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
             "models": {
                 "stt": active_settings.stt_model,
+                "sttReady": (
+                    active_settings.stt_backend == "mock"
+                    or bool(getattr(services.stt, "ready", False))
+                ),
+                "sttLoaded": (
+                    active_settings.stt_backend == "mock"
+                    or bool(getattr(services.stt, "loaded", False))
+                ),
                 "sileroReady": active_settings.silero_model_path.is_file(),
                 "ttsModel": active_settings.tts_model,
                 "ttsReady": active_settings.tts_ready,

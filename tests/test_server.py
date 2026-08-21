@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fastapi.testclient import TestClient
 
 from voice_interviewer.server import create_app
@@ -14,6 +16,8 @@ def test_health_and_static_client(mock_settings) -> None:
     assert health.status_code == 200
     assert health.json()["backends"]["stt"] == "mock"
     assert health.json()["backends"]["tts"] == "mock"
+    assert health.json()["models"]["sttReady"] is True
+    assert health.json()["models"]["sttLoaded"] is True
     assert health.json()["models"]["ttsReady"] is True
     assert health.json()["models"]["ttsModel"] == "mock"
     assert index.status_code == 200
@@ -32,6 +36,30 @@ def test_health_and_static_client(mock_settings) -> None:
     assert 'Structured interview state' not in index.text
     assert 'Event log' not in index.text
     assert diagram_bundle.status_code == 200
+
+
+def test_lifespan_preloads_ready_local_stt(mock_settings, monkeypatch) -> None:
+    class LoadableSTT:
+        ready = True
+
+        def __init__(self) -> None:
+            self.loaded = False
+            self.load_calls = 0
+
+        async def load(self) -> None:
+            self.load_calls += 1
+            self.loaded = True
+
+    stt = LoadableSTT()
+    monkeypatch.setattr("voice_interviewer.server.create_stt", lambda settings: stt)
+    settings = replace(mock_settings, stt_backend="faster-whisper")
+
+    with TestClient(create_app(settings)) as client:
+        health = client.get("/health").json()
+
+    assert stt.load_calls == 1
+    assert health["models"]["sttReady"] is True
+    assert health["models"]["sttLoaded"] is True
 
 
 def test_websocket_configures_mock_session(mock_settings) -> None:

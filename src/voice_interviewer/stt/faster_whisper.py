@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,7 @@ class FasterWhisperSTT:
         model_root: Path,
         device: str = "cpu",
         compute_type: str = "int8",
-        cpu_threads: int = 4,
+        cpu_threads: int = 2,
     ) -> None:
         self.model_name = model_name
         self.model_root = model_root
@@ -34,17 +36,32 @@ class FasterWhisperSTT:
         self.cpu_threads = cpu_threads
         self._model: Any | None = None
         self._load_lock = asyncio.Lock()
+        self._transcription_lock = asyncio.Lock()
 
     @property
     def loaded(self) -> bool:
         return self._model is not None
 
+    @property
+    def ready(self) -> bool:
+        return (self.model_root / f"faster-whisper-{self.model_name}").is_dir()
+
     async def load(self) -> None:
         if self._model is not None:
             return
         async with self._load_lock:
-            if self._model is None:
-                self._model = await asyncio.to_thread(self._load_sync)
+            if self._model is not None:
+                return
+            load_job = asyncio.create_task(asyncio.to_thread(self._load_sync))
+            try:
+                self._model = await asyncio.shield(load_job)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    self._model = await load_job
+                raise
+            except RuntimeError as error:
+                _raise_actionable_memory_error(error)
+                raise
 
     def _load_sync(self) -> Any:
         from faster_whisper import WhisperModel
@@ -65,7 +82,19 @@ class FasterWhisperSTT:
         self, audio: np.ndarray, *, prompt: str | None = None
     ) -> Transcript:
         await self.load()
-        return await asyncio.to_thread(self._transcribe_sync, audio, prompt)
+        async with self._transcription_lock:
+            transcription_job = asyncio.create_task(
+                asyncio.to_thread(self._transcribe_sync, audio, prompt)
+            )
+            try:
+                return await asyncio.shield(transcription_job)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await transcription_job
+                raise
+            except RuntimeError as error:
+                _raise_actionable_memory_error(error)
+                raise
 
     def _transcribe_sync(self, audio: np.ndarray, prompt: str | None) -> Transcript:
         if self._model is None:
@@ -115,6 +144,61 @@ class FasterWhisperSTT:
             duration_seconds=duration_seconds,
             segments=segments,
         )
+
+
+def _raise_actionable_memory_error(error: RuntimeError) -> None:
+    message = str(error).casefold()
+    if not any(
+        marker in message
+        for marker in ("mkl_malloc", "failed to allocate memory", "std::bad_alloc")
+    ):
+        return
+    memory_summary = _windows_memory_summary()
+    raise RuntimeError(
+        "faster-whisper could not allocate CPU inference memory in MKL/CTranslate2. "
+        f"{memory_summary}"
+        "Close memory-heavy applications and duplicate interviewer/test processes, then "
+        "restart the server. Keep the Windows page file system-managed or increase it. "
+        "VOICE_STT_CPU_THREADS=1 or 2 can reduce transient scratch-memory pressure but "
+        "cannot overcome an exhausted commit limit."
+    ) from error
+
+
+def _windows_memory_summary() -> str:
+    if os.name != "nt":
+        return "The host memory or commit limit is exhausted. "
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", wintypes.DWORD),
+                ("dwMemoryLoad", wintypes.DWORD),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = _MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(status)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return "The Windows memory or commit limit is exhausted. "
+        mebibyte = 1024 * 1024
+        available_physical = status.ullAvailPhys / mebibyte
+        available_commit = status.ullAvailPageFile / mebibyte
+        commit_limit = status.ullTotalPageFile / mebibyte
+        return (
+            f"Windows reports {available_physical:,.0f} MB available physical memory and "
+            f"{available_commit:,.0f} MB available commit against a "
+            f"{commit_limit:,.0f} MB commit limit. "
+        )
+    except (AttributeError, OSError, ValueError):
+        return "The Windows memory or commit limit is exhausted. "
 
 
 def _optional_float(value: object, attribute: str) -> float | None:

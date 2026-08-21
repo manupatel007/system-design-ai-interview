@@ -48,7 +48,7 @@ flowchart LR
 - Language: English only
 - Invocation: one final decode per VAD-delimited utterance
 
-The model is loaded lazily and retained for the life of the process. The implementation passes NumPy audio directly to faster-whisper, avoiding a system FFmpeg dependency.
+When the pinned local artifacts are ready, the server loads the model once during application startup and retains it for the life of the process. The implementation passes NumPy audio directly to faster-whisper, avoiding a system FFmpeg dependency. Startup preload makes an unsafe memory state fail before an interview rather than during the first answer.
 
 Partial Whisper decodes are intentionally absent from the decision loop. Re-decoding short rolling windows can create unstable or duplicated text. A future UI-only partial transcript layer may be added without allowing unstable text to trigger the interviewer.
 
@@ -166,7 +166,8 @@ Avoid large lists of common words. Store the raw transcript separately from any 
 - One WebSocket session owns its VAD recurrent state, segmenter, turn gate, and event sequence.
 - The same session owns its mutable interview phase, question thread, evidence ledger, and rubric coverage.
 - A per-session queue prevents audio reception from blocking during transcription.
-- The STT adapter and loaded model are shared across sessions.
+- The STT adapter and loaded model are shared across sessions; inference is serialized by a lock.
+- Canceled STT load/inference jobs are drained before their lock is released, preventing orphan native work after reconnects.
 - The TTS adapter and loaded model are shared, with synthesis serialized by a lock.
 - Response tasks are independently cancellable.
 - WebSocket sends are serialized by an asynchronous lock.
@@ -192,7 +193,8 @@ If transcript persistence is added, define consent, retention, encryption, delet
 | Silero model missing | WebSocket closes with `session_start_failed` | Surface guided download action |
 | Piper files missing | Emits `response_failed` on first response | Run `scripts/download_models.py --piper` |
 | Kokoro files missing | Emits `response_failed` when the alternate backend is selected | Run `scripts/download_models.py --kokoro` |
-| STT inference failure | Emits `transcription_failed` | Retry once, then offer text input |
+| STT MKL allocation failure | Emits actionable physical/commit headroom in `transcription_failed`; startup preload catches load failures earlier | Free commit, increase the Windows page file, and avoid duplicate native workers |
+| Other STT inference failure | Emits `transcription_failed` | Retry once, then offer text input |
 | Empty or unreliable transcript | Emits `candidate.transcript.rejected`; no interviewer response | Track rejection reason and input-level telemetry |
 | Invalid plan or LLM failure | Emits `response_failed` before applying state | Provider fallback and retry |
 | TTS failure | Preserves accepted state and text, then emits `response_failed` | Continue in text-only mode |
@@ -216,6 +218,15 @@ Initial targets for the target development machine:
 | End of candidate turn to first audio | under 2 seconds p95 |
 
 The VAD silence and canvas quiet periods overlap where possible. They should not be blindly summed in product latency calculations. Piper sentence streaming now supplies the low-latency TTS path; the end-to-end target still includes LLM planning and network scheduling.
+
+## Windows Memory Headroom
+
+CTranslate2 CPU allocations consume Windows commit, whose ceiling is physical RAM plus the page
+file. The observed `mkl_malloc` incident occurred with only about 1.1 GB of remaining commit.
+Cancellation previously allowed an executor thread to outlive its caller and overlap a new native
+load or inference; adapter-level shielding and serialization now prevent that multiplier.
+
+See `docs/STT_MEMORY_FINDINGS.md` for measured counters, the reproduction, and remediation steps.
 
 ## Next Implementation Steps
 

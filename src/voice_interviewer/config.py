@@ -89,7 +89,7 @@ class Settings:
             stt_model=os.getenv("VOICE_STT_MODEL", "base.en"),
             stt_device=os.getenv("VOICE_STT_DEVICE", "cpu"),
             stt_compute_type=os.getenv("VOICE_STT_COMPUTE_TYPE", "int8"),
-            stt_cpu_threads=_integer("VOICE_STT_CPU_THREADS", 4),
+            stt_cpu_threads=_integer("VOICE_STT_CPU_THREADS", 2),
             silero_model_path=model_root / "silero-vad" / "silero_vad.onnx",
             sample_rate=_integer("VOICE_SAMPLE_RATE", 16_000),
             vad_backend=os.getenv("VOICE_VAD_BACKEND", "silero"),
