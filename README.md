@@ -11,13 +11,9 @@
 
 ## Watch the voice loop
 
-<p align="center">
-  <a href="docs/assets/end-to-end-voice-demo.mp4">
-    <img src="docs/assets/end-to-end-voice-demo-poster.jpg" alt="Watch the narrated end-to-end voice interview demo" width="920" />
-  </a>
-  <br />
-  <a href="docs/assets/end-to-end-voice-demo.mp4"><strong>▶ Watch the 90-second narrated demo with audio</strong></a>
-</p>
+https://github.com/user-attachments/assets/1fc8c53d-c33e-4e52-ae6b-3334e91585e1
+
+[Download the repository copy of the 90-second narrated demo](docs/assets/end-to-end-voice-demo.mp4)
 
 The walkthrough uses the real meeting UI and Guided Takeover state machine. Piper voices the
 interviewer and Kokoro voices the candidate locally. The dialogue is scripted and post-synchronized,
